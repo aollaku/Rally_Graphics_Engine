@@ -72,3 +72,23 @@ The site should remain available through `app2`.
 ## v34 Security Update
 - Removed default admin credentials from the login page.
 - Default admin account is still created by environment variables for first setup. Change the password after first login.
+
+
+## v35 HTTPS-only change
+
+HTTP access has been disabled. NGINX now exposes only HTTPS on port 8443.
+
+Open:
+
+- https://localhost:8443/controller
+- https://localhost:8443/tablet
+- https://localhost:8443/output/live
+
+There is no `8080:80` mapping in docker-compose.yml anymore.
+
+Run:
+
+```bash
+docker compose down -v --remove-orphans
+docker compose up -d --build
+```
