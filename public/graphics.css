@@ -1,0 +1,125 @@
+html,body{
+  margin:0;width:100%;height:100%;overflow:hidden;
+  background:rgba(0,0,0,0);
+  font-family:Arial,Helvetica,sans-serif;color:#111;
+}
+.gfx{position:absolute;left:0;right:0;top:0;width:100%;height:100%;animation:in .28s ease-out;}
+.hidden,.blank{display:none!important}
+
+/* V27 broadcast template output only. Controller/tablet UI is untouched. */
+.template-stage{position:absolute;inset:0;width:100%;height:100%;background:transparent;}
+.template-board{position:absolute;left:4.0vw;right:4.0vw;top:9.2vh;color:#111;}
+.template-board.result{top:11.0vh;}
+.template-board.entry-board{top:5.2vh;}
+.template-title{
+  text-align:center;font-size:2.35vw;line-height:1.05;font-weight:950;
+  text-transform:uppercase;letter-spacing:.015em;margin:0 0 1.15vh;color:#242424;
+}
+.template-title.entry{font-size:4.15vw;margin:0 0 1.05vh;}
+.title-line{width:30vw;height:.72vh;background:#000;margin:0 auto .85vh;}
+.template-table{background:#262421;padding:0 1.15vw 1.45vh;box-shadow:none;}
+.template-table.result{padding-top:0;}
+.template-table.entry{padding-bottom:1.35vh;}
+.template-header{
+  height:5.8vh;display:grid;align-items:center;color:#fff;font-weight:950;
+  text-transform:uppercase;font-size:1.48vw;border-bottom:.24vh solid #f5a83f;
+  column-gap:.70vw;text-align:center;
+}
+.template-header>div{display:flex;align-items:center;justify-content:center;text-align:center;white-space:nowrap;}
+.template-row{
+  display:grid;align-items:center;column-gap:.70vw;min-height:5.48vh;margin-top:1.0vh;
+  font-weight:900;font-size:1.31vw;
+}
+.template-row .cell{
+  background:#fff;height:100%;display:flex;align-items:center;padding:0 .72vw;overflow:hidden;
+  white-space:nowrap;text-overflow:ellipsis;box-shadow:inset 0 0 0 1px rgba(0,0,0,.04);
+}
+.template-row .posCell{
+  justify-content:center;background:#f6aa41;color:#000;font-weight:950;min-width:0;
+  overflow:visible;text-overflow:clip;padding:0 .30vw;font-size:1.17vw;letter-spacing:.01em;
+}
+.template-row .center{justify-content:center;text-align:center;}
+.template-row .time,.template-row .diff{justify-content:center;text-align:center;font-variant-numeric:tabular-nums;}
+
+/* Entry list: class and champs are deliberately separated. Champs sits centred in its own wider column. */
+.entryGrid{grid-template-columns:4.25vw 1.08fr 1.08fr 1.15fr .55fr 1.75fr;}
+.entryHead{grid-template-columns:4.25vw 1.08fr 1.08fr 1.15fr .55fr 1.75fr;}
+.entryHead div:first-child{visibility:hidden;}
+.entryHead div:nth-child(5){padding-left:.05vw;padding-right:.05vw;}
+.entryHead div:last-child{font-size:1.42vw;justify-content:center;text-align:center;}
+.entryGrid .cell:nth-child(5){justify-content:center;text-align:center;padding:0 .28vw;font-size:1.16vw;}
+.entryGrid .champCell{
+  justify-content:center;text-align:center;white-space:normal;text-overflow:clip;overflow:hidden;
+  font-size:.78vw;line-height:1.05;letter-spacing:-.018em;padding:.18vh .48vw;
+  word-break:normal;overflow-wrap:break-word;
+}
+.entryGrid .champCell .champText{
+  display:block;width:100%;max-height:100%;text-align:center;
+}
+.entryGrid .cell:nth-child(2),.entryGrid .cell:nth-child(3){font-size:1.32vw;}
+
+.resultGrid{grid-template-columns:4.2vw 1.52fr 1.42fr 1.44fr .55fr .68fr .72fr;}
+.resultHead{grid-template-columns:4.2vw 1.52fr 1.42fr 1.44fr .55fr .68fr .72fr;}
+
+.no-footer{height:0;display:none!important;}
+
+/* Compact stage-time graphic, matched to the supplied small stage-time template. */
+.compact-wrap{position:absolute;inset:0;background:transparent;}
+.compact-ss{
+  position:absolute;left:4.4vw;top:7.2vh;width:19.0vw;color:#000;font-weight:900;
+  border:2px solid #171717;background:#171717;box-sizing:border-box;
+}
+.compact-title{
+  background:#111;color:#fff;font-size:1.08vw;line-height:1.05;padding:.62vh .55vw .72vh;
+  text-align:center;text-transform:uppercase;font-weight:950;
+}
+.compact-head{
+  display:grid;grid-template-columns:3.55vw 1fr 5.45vw;background:#444;color:#fff;
+  font-size:.86vw;line-height:1;padding:.45vh 0;border-top:1px solid #1b1b1b;
+  border-bottom:2px solid #171717;text-align:center;font-weight:950;
+}
+.compact-row{
+  display:grid;grid-template-columns:3.55vw 1fr 5.45vw;min-height:6.35vh;background:#fff;
+  border-top:2px solid #171717;box-sizing:border-box;
+}
+.compact-pos{
+  background:#f6aa41;display:flex;align-items:center;justify-content:center;font-size:1.28vw;
+  line-height:1;border-right:2px solid #171717;font-weight:950;
+}
+.compact-crew{
+  background:#fff;padding:.45vh .45vw 0;line-height:1.06;overflow:hidden;font-size:.80vw;
+  border-right:2px solid #171717;position:relative;
+}
+.compact-crew .crew-name{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:950;}
+.compact-crew .crew-car{
+  display:block;margin:.35vh -.45vw 0;padding:.23vh .45vw;background:#6a6a6a;color:#000;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:.72vw;line-height:1;font-weight:950;
+}
+.compact-time{
+  background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  font-variant-numeric:tabular-nums;line-height:1.15;font-size:.82vw;padding:.2vh .18vw;
+  text-align:center;overflow:hidden;
+}
+.compact-time .stage-time{font-weight:950;white-space:nowrap;}
+.compact-time .stage-diff{font-weight:950;white-space:nowrap;font-size:.70vw;margin-top:.28vh;}
+
+@keyframes in{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
+@media(max-width:1000px){
+  .template-board{left:2vw;right:2vw;top:5vh}.template-title{font-size:3.4vw}.template-title.entry{font-size:5vw}.template-header{font-size:2vw}.template-row{font-size:1.7vw}.template-row .posCell{font-size:1.65vw}.entryGrid .champCell{font-size:1.05vw}
+}
+
+
+/* V29 graphics fixes: no entry white strip, readable stage-result car text, no leading zero display handled in JS. */
+.template-row .posCell{font-size:1.26vw;}
+.resultGrid.stageResult .cell:nth-child(4){
+  background:#555;color:#fff;text-shadow:0 1px 0 rgba(0,0,0,.4);
+}
+.resultGrid.stageResult .cell:nth-child(4) *{color:#fff;}
+
+/* v28.1 final output fix: stage-times car strip must use white text on dark grey. */
+.compact-crew .crew-car{
+  color:#fff !important;
+  background:#5f5f5f !important;
+  text-shadow:0 1px 0 rgba(0,0,0,.55);
+}
+.compact-crew .crew-car *{color:#fff !important;}

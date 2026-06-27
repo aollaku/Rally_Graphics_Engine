@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rally Graphics - Tablet Controller</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="tablet-controller">
+  <main class="tabletShell">
+    <header class="tabletTop"><strong>Rally Graphics</strong><input id="eventId" inputmode="numeric" value="757"><button id="saveEvent">↻</button><span class="badge live">Live</span></header>
+    <section class="tabletTiles">
+      <button class="tile overall" data-type="overall">🏆<strong>OVERALL</strong><span>Pages of 10</span></button>
+      <button class="tile stageTile" data-type="stage">⚑<strong>STAGE RESULTS</strong><span>Pages of 10</span></button>
+      <button class="tile stageTile" data-type="stageTimes">⏱<strong>STAGE TIMES</strong><span>Compact</span></button>
+      <button class="tile entries" data-type="entries">👥<strong>ENTRY LIST</strong><span>All Competitors</span></button>
+    </section>
+    <section class="tabletStage"><h3>Stage Selector</h3><div id="stageButtons" class="stage-grid tabletStages"></div></section>
+    <section class="tabletStage"><h3>Page Selector</h3><div id="pageButtons" class="stage-grid tabletStages page-grid"></div><p><span id="totalRows">-- rows</span></p></section>
+    <section class="tabletActions">
+      <button id="openOutput" class="outline">↗ Open Output</button>
+      <button id="copyUrl" class="outline">📋 Copy URL</button>
+      <button id="clearGraphic" class="red">🗑 Clear Graphic</button>
+    </section>
+    <section class="tabletActions">
+      <button id="addRundown" class="green">＋ Add</button>
+      <button id="takeNext" class="blue">Take Next</button>
+      <button id="clearRundown" class="red">Clear Rundown</button>
+    </section>
+    <div id="rundownList" class="rundownList tabletRundown"></div>
+    <input id="outputUrl" readonly>
+    <p id="eventInfo" class="muted"></p>
+    <span id="pageNo" class="hiddenText">Page 1</span><input id="pageSize" type="hidden" value="10"><select id="stageSelect" hidden></select><select id="rundownSeconds" hidden><option value="10">10</option></select><button id="autoRundown" hidden></button>
+  </main>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/controller.js"></script>
+</body>
+</html>

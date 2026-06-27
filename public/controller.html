@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Rally Graphics - Desktop Controller</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body class="desktop-controller">
+  <aside class="sidebar">
+    <div class="brand"><div class="logo">RG</div><div><strong>Rally Graphics</strong><span>Djames Results</span></div></div>
+    <nav>
+      <button class="nav active" data-target="dashboard">Dashboard</button>
+      <button class="nav" data-type="overall">Overall Leaderboard</button>
+      <button class="nav" data-target="stage">Stage Results</button>
+      <button class="nav" data-type="stageTimes">Stage Times</button>
+      <button class="nav" data-type="entries">Entry List</button>
+      <button class="nav" id="usersNav" data-target="users">User Management</button>
+      <a class="nav link" id="tabletLink" href="/tablet">Tablet Controller</a>
+      <a class="nav link" id="outputLinkSide" href="/output" target="_blank">Open Output</a>
+    </nav>
+    <div class="statusBox"><span class="dot"></span><div><strong>Service Status</strong><span id="serviceStatus">Connected</span></div></div>
+    <div class="small muted">Last Updated<br><strong id="lastUpdated">--</strong></div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <label>Current Event</label>
+      <input id="eventId" inputmode="numeric" value="757">
+      <button id="saveEvent" class="blue">Load / Refresh</button>
+      <span class="spacer"></span>
+      <span id="userBadge" class="badge">User</span><button id="logoutBtn" class="outline smallBtn">Logout</button><span id="liveBadge" class="badge live">Live</span>
+    </header>
+
+    <section class="layout">
+      <div class="column">
+        <section class="card eventCard">
+          <div class="cardTitle">Event Information <span class="badge live">Live</span></div>
+          <h1 id="eventTitle">Loading...</h1>
+          <p id="eventDate" class="date"></p>
+          <p id="eventInfo" class="muted"></p>
+        </section>
+
+        <section class="card">
+          <div class="cardTitle">Quick Access</div>
+          <div class="bigActions">
+            <button class="tile overall" data-type="overall">🏆<strong>Overall Leaderboard</strong><span>All rankings, 10 per graphic</span></button>
+            <button class="tile stageTile" data-target="stage">⚑<strong>Stage Results</strong><span>All rankings, 10 per graphic</span></button>
+            <button class="tile stageTile" data-type="stageTimes">⏱<strong>Stage Times</strong><span>Compact live stage graphic</span></button>
+            <button class="tile entries" data-type="entries">👥<strong>Entry List</strong><span>All competitors</span></button>
+          </div>
+          <h3>Stage Selector <small>(for Stage Results)</small></h3>
+          <div id="stageButtons" class="stage-grid compact"></div>
+          <p class="center muted">Not all stages may be available for every event.</p>
+          <h3>Page Selector <small>10 rows per graphic</small></h3>
+          <div id="pageButtons" class="stage-grid page-grid compact"></div>
+          <p class="center muted"><span id="totalRows">-- rows</span></p>
+        </section>
+      </div>
+
+      <div class="column">
+        <section class="card outputCard">
+          <div class="cardTitle">Graphics Output</div>
+          <label>Select Output Type</label>
+          <div class="segmented">
+            <button class="seg active" data-type="overall">🏆 Overall Leaderboard</button>
+            <button class="seg" data-type="stage">⚑ Stage Results</button>
+            <button class="seg" data-type="stageTimes">⏱ Stage Times</button>
+            <button class="seg" data-type="entries">👥 Entry List</button>
+          </div>
+          <label>Stage <small>(for Stage Results / Stage Times)</small></label>
+          <select id="stageSelect"></select>
+          <label>Page <small>10 rows per graphic</small></label>
+          <div id="pageButtons" class="stage-grid page-grid compact"></div>
+          <div class="row"><span id="pageNo" class="badge">Page 1</span><span id="totalRows" class="muted small">-- rows</span></div>
+          <input id="pageSize" type="hidden" value="10">
+          <label>Output URL</label>
+          <input id="outputUrl" readonly>
+          <div class="row actions">
+            <button id="openOutput" class="outline">↗ Open in New Tab</button>
+            <button id="copyUrl" class="outline">📋 Copy URL</button>
+            <button id="clearGraphic" class="red">🗑 Clear Graphic</button>
+          </div>
+          <div class="tip">Make sure “Transparent Background” is enabled in your graphics software if you overlay this on a stream.</div>
+          <div class="row refreshRow">
+            <label class="switchLabel">Auto Refresh <input id="autoRefresh" type="checkbox" checked><span></span></label>
+            <label>Refresh Every <select id="refreshEvery"><option value="15000">15 sec</option><option value="30000" selected>30 sec</option><option value="60000">60 sec</option></select></label>
+          </div>
+          <div class="row actions bottomActions">
+            <button id="refreshData" class="blue">↻ Refresh Data</button>
+            <button id="clearCache" class="green">🧹 Clear Cache</button>
+            <button id="clearGraphic2" class="red">🗑 Clear Graphic</button>
+          </div>
+        </section>
+      </div>
+
+      <div class="column previewColumn">
+        <section class="card previewCard">
+          <div class="cardTitle">Output Preview (Live)</div>
+          <iframe id="previewFrame" title="Live graphics preview"></iframe>
+          <button id="openOutput2" class="outline right">↗ Open in New Tab</button>
+        </section>
+
+        <section class="card adminCard">
+          <div class="cardTitle">Database / Import / Export / Backup</div>
+          <div class="statusLine"><span class="dot" id="dbDot"></span><strong>Database:</strong> <span id="dbStatus">Checking...</span></div>
+          <div class="statusLine"><span class="dot" id="backupDot"></span><strong>Backups:</strong> <span id="backupStatus">Checking...</span></div>
+          <div class="row actions">
+            <button id="exportJson" class="outline">⬇ Export DB JSON</button>
+            <select id="importMode"><option value="merge" selected>Import: Merge</option><option value="replace">Import: Replace DB</option></select>
+            <button id="importJson" class="outline">⬆ Import DB JSON</button>
+            <input id="importFile" type="file" accept="application/json" hidden>
+          </div>
+          <div class="row actions">
+            <button id="refreshAdmin" class="blue">↻ Refresh Status</button>
+            <select id="backupSelect"></select>
+            <button id="downloadBackup" class="outline">Download Backup</button>
+          </div>
+          <p class="muted small">Data is stored in PostgreSQL. Backups are created automatically by the backup container.</p>
+        </section>
+
+
+        <section class="card rundownCard">
+          <div class="cardTitle">Rundown</div>
+          <p class="muted small">Add Overall, Stage or Entry pages to a running order. Each item outputs 10 rows.</p>
+          <div class="row actions">
+            <button id="addRundown" class="green">＋ Add Current</button>
+            <button id="takeNext" class="blue">Take Next</button>
+            <button id="clearRundown" class="red">Clear Rundown</button>
+          </div>
+          <div class="row actions">
+            <label>Auto every <select id="rundownSeconds"><option value="5">5 sec</option><option value="10" selected>10 sec</option><option value="15">15 sec</option><option value="20">20 sec</option></select></label>
+            <button id="autoRundown" class="outline">▶ Auto Rundown</button>
+          </div>
+          <div id="rundownList" class="rundownList"></div>
+        </section>
+
+        <section class="card userCard" id="userCard" style="display:none">
+          <div class="cardTitle">User Management <span class="badge">Admin only</span></div>
+          <p class="muted small">Create and manage PC/tablet users. This section is only visible on the machine control page for admin users.</p>
+          <div class="userForm">
+            <input id="newUsername" placeholder="Username">
+            <input id="newPassword" placeholder="Password" type="password">
+            <input id="newDisplayName" placeholder="Display name">
+            <select id="newRole"><option value="operator">Operator</option><option value="tablet">Tablet</option><option value="viewer">Viewer</option><option value="admin">Admin</option></select>
+            <button id="createUser" class="green">Create User</button>
+          </div>
+          <div id="usersList" class="usersList"></div>
+        </section>
+        <section class="card howto">
+          <div class="cardTitle">How to Use</div>
+          <ol>
+            <li>Select the data you want to display.</li>
+            <li>Click “Copy URL” and add it to OBS, vMix, CasparCG or a browser source.</li>
+            <li>Click “Open in New Tab” to preview the output.</li>
+            <li>Use “Clear Graphic” to hide the graphic output.</li>
+          </ol>
+        </section>
+      </div>
+    </section>
+  </main>
+<script src="/socket.io/socket.io.js"></script>
+<script src="/controller.js"></script>
+</body>
+</html>
