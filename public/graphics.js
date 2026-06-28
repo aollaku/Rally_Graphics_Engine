@@ -62,14 +62,37 @@ function champText(r){
     .replace(/\bKingfisher\b(?!.*Championship)/gi, 'Kingfisher')
     .trim();
 }
-function stageTitle(subtitle, fallback){
-  const s = String(subtitle||'').replace(/Final\s+Overall\s+Positions\s+after\s+/i,'Times for ').replace(/\s+-\s+/,' : ');
-  return cleanTitle(s || fallback);
+function stageTitleParts(subtitle, fallbackStage){
+  const raw = String(subtitle || '').replace(/\s+/g, ' ').trim();
+  let stageNo = String(fallbackStage || '').trim();
+  let stageName = '';
+
+  // Common DJames examples:
+  // "Final Overall Positions after stage 1 - Llangower 1"
+  // "Times for Stage 1 : Llangower 1"
+  let m = raw.match(/stage\s*(\d+)\s*[-:]\s*(.+)$/i);
+  if (m) {
+    stageNo = m[1];
+    stageName = m[2];
+  } else {
+    m = raw.match(/stage\s*(\d+)/i);
+    if (m) stageNo = m[1];
+  }
+
+  stageName = stageName
+    .replace(/^[-:]+\s*/, '')
+    .replace(/\s+-\s*page\s*\d+.*$/i, '')
+    .trim();
+
+  return {
+    line1: cleanTitle(`TIMES FOR STAGE ${stageNo || ''} :`),
+    line2: cleanTitle(stageName || '')
+  };
 }
 function renderStageTimes(subtitle, rows){
-  const title = stageTitle(subtitle, 'Times for Stage');
+  const title = stageTitleParts(subtitle, '');
   return `<div class="compact-wrap"><div class="compact-ss">
-    <div class="compact-title">${esc(title)}</div>
+    <div class="compact-title"><div class="compact-title-main">${esc(title.line1)}</div><div class="compact-title-stage">${esc(title.line2)}</div></div>
     <div class="compact-head"><div>POS</div><div>CREW</div><div>TIME</div></div>
     ${rows.map(r=>`<div class="compact-row">
       <div class="compact-pos">${esc(padNum(r.position))}</div>

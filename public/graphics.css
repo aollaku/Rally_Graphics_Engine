@@ -123,3 +123,9 @@ html,body{
   text-shadow:0 1px 0 rgba(0,0,0,.55);
 }
 .compact-crew .crew-car *{color:#fff !important;}
+
+/* v37: Stage Times title only split into two lines. Layout otherwise unchanged. */
+.compact-title{padding:.52vh .55vw .62vh;}
+.compact-title-main,.compact-title-stage{display:block;text-align:center;text-transform:uppercase;font-weight:950;line-height:1.02;}
+.compact-title-main{font-size:1.02vw;}
+.compact-title-stage{font-size:1.02vw;margin-top:.08vh;}

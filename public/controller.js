@@ -18,14 +18,19 @@ const auth = token ? { 'x-rally-token': token } : {};
 
 function withToken(path){ if (!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
 function api(path, opts={}){ return fetch(withToken(path), {headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
-function outputUrl(){ return location.origin + '/output/live' + tokenPart; }
+function outputOrigin(){
+  const host = location.hostname || 'localhost';
+  return `http://${host}:8080`;
+}
+function outputUrl(){ return outputOrigin() + '/output/live' + tokenPart; }
+function previewUrl(){ return location.origin + '/preview/live' + tokenPart; }
 function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
 function totalFor(type, stageId=0){ return type === 'overall' ? totals.overall : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
 function totalPagesFor(type, stageId=0){ return Math.max(1, Math.ceil((totalFor(type, stageId) || 0) / pageSize)); }
 function setLastUpdated(){ const el=qs('#lastUpdated'); if(el) el.textContent = new Date().toLocaleString(); }
 function setOutputFields(){
   const out = qs('#outputUrl'); if(out) out.value = outputUrl();
-  const frame = qs('#previewFrame'); if(frame && frame.src !== outputUrl()) frame.src = outputUrl();
+  const frame = qs('#previewFrame'); if(frame && frame.src !== previewUrl()) frame.src = previewUrl();
   const side = qs('#outputLinkSide'); if(side) side.href = outputUrl();
   const tablet = qs('#tabletLink'); if(tablet) tablet.href = '/tablet' + tokenPart;
 }

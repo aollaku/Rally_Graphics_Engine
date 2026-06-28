@@ -105,6 +105,8 @@ app.get('/controller', requireLogin, (_, res) => res.sendFile(path.join(__dirnam
 app.get('/tablet', requireLogin, (_, res) => res.sendFile(path.join(__dirname, '..', 'public', 'tablet.html')));
 app.get('/output', (_, res) => res.sendFile(path.join(__dirname, '..', 'public', 'graphics', 'output.html')));
 app.get('/output/live', (_, res) => res.sendFile(path.join(__dirname, '..', 'public', 'graphics', 'output.html')));
+// HTTPS-safe internal preview for the controller. The public programme output remains HTTP-only via NGINX.
+app.get('/preview/live', (_, res) => res.sendFile(path.join(__dirname, '..', 'public', 'graphics', 'output.html')));
 
 app.get('/healthz', async (req, res) => {
   const database = await db.status();
