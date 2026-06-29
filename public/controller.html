@@ -17,6 +17,8 @@
       <button class="nav" data-target="designer">Designer</button>
       <button class="nav" data-target="data">Data</button>
       <button class="nav" data-target="settings">Settings</button>
+      <button class="nav" data-target="health">Health</button>
+      <button class="nav" data-target="logs">Errors</button>
       <a class="nav link" id="tabletLink" href="/tablet">Tablet Controller</a>
     </nav>
     <div class="statusBox"><span class="dot"></span><div><strong>Service Status</strong><span id="serviceStatus">Connected</span></div></div>
@@ -74,8 +76,8 @@
           <div class="dashboardGrid">
             <div class="dashTile"><strong>Program</strong><span id="homeProgramLabel">Blank</span></div>
             <div class="dashTile"><strong>Preview</strong><span id="homePreviewLabel">Blank</span></div>
-            <div class="dashTile"><strong>API</strong><span>Connected</span></div>
-            <div class="dashTile"><strong>Output</strong><span>HTTP</span></div>
+            <div class="dashTile ledTile"><span class="led green" id="dashApiLed"></span><strong>API</strong><span id="dashApiText">Checking...</span></div>
+            <div class="dashTile ledTile"><span class="led green" id="dashDbLed"></span><strong>Database</strong><span id="dashDbText">Checking...</span></div>
           </div>
           <p class="muted small">Quick Access buttons removed. Use the Graphics section for selecting content, Scenes for Preview/Program, Outputs for windows, Designer for graphic style, and Data for import/export.</p>
         </section>
@@ -100,10 +102,8 @@
           <label>Output URL</label>
           <input id="outputUrl" readonly>
           <div class="targetPanel">
-            <strong>Trigger Target</strong>
-            <label class="switchLabel smallSwitch">Preview <input id="targetPreview" type="checkbox"><span></span></label>
-            <label class="switchLabel smallSwitch">Live Output <input id="targetOutput" type="checkbox" checked><span></span></label>
-            <small class="muted">Choose Preview, Live Output, or both before selecting a graphic/page.</small>
+            <strong>Two-step trigger</strong>
+            <small id="twoStepHint" class="muted">Press a graphic once to load Preview. Press the same graphic again to send it to Live Output.</small>
           </div>
           <div class="row actions">
             <button id="openOutput" class="outline">↗ Open Output</button>
@@ -141,6 +141,26 @@
           </div>
           <p class="muted small">Full Config exports graphics settings, current app settings, rundowns and stored rally data so you can load them back later.</p>
         </section>
+
+        <section class="card healthCard" id="healthCard">
+          <div class="cardTitle">Health / Status <span class="badge">LED Monitor</span></div>
+          <div class="healthGrid">
+            <div class="healthItem"><span class="led" id="healthApiLed"></span><div><strong>Application API</strong><span id="healthApiText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthDbLed"></span><div><strong>Postgres Database</strong><span id="healthDbText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthInternetLed"></span><div><strong>Internet / Rally Data</strong><span id="healthInternetText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthPreviewLed"></span><div><strong>Preview Output</strong><span id="healthPreviewText">Waiting...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthProgramLed"></span><div><strong>Program Output</strong><span id="healthProgramText">Waiting...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthConfigLed"></span><div><strong>Config Version</strong><span id="healthConfigText">Checking...</span></div></div>
+          </div>
+          <div class="row actions"><button id="refreshHealth" class="outline">↻ Refresh Health</button></div>
+        </section>
+
+        <section class="card errorCard" id="errorCard">
+          <div class="cardTitle">Error Viewer <span class="badge">Simple Messages</span></div>
+          <p class="muted small">Readable system problems only. No JSON logs here.</p>
+          <div id="errorList" class="errorList"><div class="errorEmpty">No errors reported.</div></div>
+          <div class="row actions"><button id="refreshErrors" class="outline">↻ Refresh Errors</button><button id="clearErrors" class="red">Clear Error List</button></div>
+        </section>
       </div>
 
       <div class="column previewColumn">
@@ -157,6 +177,13 @@
             <button class="designerTab active" data-designer-tab="position" type="button">Resize / Position</button>
             <button class="designerTab" data-designer-tab="look" type="button">Opacity / Look</button>
             <button class="designerTab" data-designer-tab="animation" type="button">Animation</button>
+            <button class="designerTab" data-designer-tab="presets" type="button">Presets</button>
+            <button class="designerTab" data-designer-tab="safety" type="button">Safe / Lock</button>
+          </div>
+          <div class="designerToolbar">
+            <label>Settings Scope <select id="gsScope"><option value="global">Global Default</option><option value="overall">Overall</option><option value="stage">Stage Results</option><option value="stageTimes">Stage Times</option><option value="entries">Entry List</option></select></label>
+            <button id="gsUndo" class="outline" type="button">↶ Undo</button>
+            <button id="gsRedo" class="outline" type="button">↷ Redo</button>
           </div>
           <div class="designerPanel active" data-designer-panel="position">
             <div class="designerGrid">
@@ -184,6 +211,23 @@
               <label>Animation Speed <span id="gs_animationSpeed_value">1.0x</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_animationSpeed" data-step-dir="-1" type="button">◀</button><input id="gs_animationSpeed" data-gs="animationSpeed" type="range" min="0.1" max="5" step="0.1"><button class="stepBtn" data-step-target="gs_animationSpeed" data-step-dir="1" type="button">▶</button></div></label>
               <label>Animation Duration <span id="gs_animationDuration_value">280ms</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="-1" type="button">◀</button><input id="gs_animationDuration" data-gs="animationDuration" type="range" min="0" max="5000" step="10"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="1" type="button">▶</button></div></label>
               <label>Easing <span id="gs_easing_value">ease-out</span><select id="gs_easing" data-gs="easing"><option value="linear">Linear</option><option value="ease">Ease</option><option value="ease-in">Ease In</option><option value="ease-out">Ease Out</option><option value="ease-in-out">Ease In Out</option><option value="cubic-bezier(.34,1.56,.64,1)">Bounce</option></select></label>
+            </div>
+          </div>
+          <div class="designerPanel" data-designer-panel="presets">
+            <div class="designerGrid">
+              <label>Preset Name<input id="gsPresetName" placeholder="BTRDA 1080 / LED Wall / Clean Feed"></label>
+              <label>Saved Presets<select id="gsPresetSelect"></select></label>
+            </div>
+            <div class="row actions">
+              <button id="gsSavePreset" class="green" type="button">Save Named Preset</button>
+              <button id="gsLoadPreset" class="blue" type="button">Load Preset</button>
+              <button id="gsDeletePreset" class="red" type="button">Delete Preset</button>
+            </div>
+          </div>
+          <div class="designerPanel" data-designer-panel="safety">
+            <div class="designerGrid">
+              <label class="checkRow"><input id="operatorLock" type="checkbox"> Operator Lock Mode <small>disables designer edits during live use</small></label>
+              <label class="checkRow"><input id="safeGuides" type="checkbox"> Show Safe Area Guides <small>visible only inside the controller preview monitor</small></label>
             </div>
           </div>
           <div class="row actions">
@@ -220,6 +264,12 @@
             <button id="createUser" class="green">Create User</button>
           </div>
           <div id="usersList" class="usersList"></div>
+        </section>
+        <section class="card shortcutCard" id="shortcutCard">
+          <div class="cardTitle">Keyboard Shortcuts <span class="badge">Configurable</span></div>
+          <p class="muted small">Click a shortcut box and press the key combination you want. Saved shortcuts are included in config export.</p>
+          <div id="shortcutList" class="shortcutList"></div>
+          <div class="row actions"><button id="saveShortcuts" class="green">Save Shortcuts</button><button id="resetShortcuts" class="outline">Reset Defaults</button></div>
         </section>
         <section class="card howto">
           <div class="cardTitle">How to Use</div>

@@ -1,9 +1,14 @@
 const socket = io({ transports: ['websocket', 'polling'] });
 const OUTPUT_MODE = location.pathname.includes('/preview') ? 'preview' : 'program';
+socket.emit('outputMode', OUTPUT_MODE);
 let lastRenderKey = '';
 const token = new URLSearchParams(location.search).get('token') || '';
 const qs = s => document.querySelector(s);
 let graphicsSettings = null;
+let uiSettings = { safeGuides:false };
+// Safe guides are allowed ONLY in the embedded controller monitor.
+// External /preview and /output pages must always stay clean.
+const IS_CONTROLLER_MONITOR = new URLSearchParams(location.search).get('controllerPreview') === '1';
 let renderSeq = 0;
 let activeLayerId = 'gfxA';
 let lastDisplayedKey = '';
@@ -26,28 +31,34 @@ function inactiveLayer(){ ensureLayers(); return document.getElementById(activeL
 function allLayers(){ const {a,b}=ensureLayers(); return [a,b]; }
 function clearSwapTimer(){ if (swapTimer) { clearTimeout(swapTimer); swapTimer = null; } }
 
-function applyGraphicsSettings(settings={}){
+function resolveGraphicsSettings(settings={}, graphicType='global'){
+  const base = settings || graphicsSettings || {};
+  const scoped = base.perGraphic && graphicType && base.perGraphic[graphicType] ? base.perGraphic[graphicType] : {};
+  return { ...base, ...scoped, perGraphic: base.perGraphic || {} };
+}
+function applyGraphicsSettings(settings={}, graphicType='global'){
   graphicsSettings = settings || graphicsSettings || {};
+  const effectiveSettings = resolveGraphicsSettings(graphicsSettings, graphicType);
   const root = document.documentElement;
   const n = (v, def) => Number.isFinite(Number(v)) ? Number(v) : def;
   const pct = v => Math.max(0, Math.min(100, n(v,100))) / 100;
-  root.style.setProperty('--gfx-scale', String(n(graphicsSettings.scale, 1)));
-  root.style.setProperty('--gfx-x', n(graphicsSettings.x, 0) + 'px');
-  root.style.setProperty('--gfx-y', n(graphicsSettings.y, 0) + 'px');
-  root.style.setProperty('--gfx-width', n(graphicsSettings.width, 1920) + 'px');
-  root.style.setProperty('--gfx-height', n(graphicsSettings.height, 1080) + 'px');
-  root.style.setProperty('--gfx-opacity', String(pct(graphicsSettings.opacity)));
-  root.style.setProperty('--gfx-bg-opacity', String(pct(graphicsSettings.backgroundOpacity)));
-  root.style.setProperty('--gfx-border-opacity', String(pct(graphicsSettings.borderOpacity)));
-  root.style.setProperty('--gfx-shadow-opacity', String(pct(graphicsSettings.shadowOpacity)));
-  root.style.setProperty('--gfx-blur', n(graphicsSettings.blur, 0) + 'px');
-  root.style.setProperty('--gfx-brightness', n(graphicsSettings.brightness, 100) + '%');
-  root.style.setProperty('--gfx-contrast', n(graphicsSettings.contrast, 100) + '%');
-  const speed = Math.max(0.1, n(graphicsSettings.animationSpeed, 1));
-  const duration = Math.max(0, n(graphicsSettings.animationDuration, 280)) / speed;
+  root.style.setProperty('--gfx-scale', String(n(effectiveSettings.scale, 1)));
+  root.style.setProperty('--gfx-x', n(effectiveSettings.x, 0) + 'px');
+  root.style.setProperty('--gfx-y', n(effectiveSettings.y, 0) + 'px');
+  root.style.setProperty('--gfx-width', n(effectiveSettings.width, 1920) + 'px');
+  root.style.setProperty('--gfx-height', n(effectiveSettings.height, 1080) + 'px');
+  root.style.setProperty('--gfx-opacity', String(pct(effectiveSettings.opacity)));
+  root.style.setProperty('--gfx-bg-opacity', String(pct(effectiveSettings.backgroundOpacity)));
+  root.style.setProperty('--gfx-border-opacity', String(pct(effectiveSettings.borderOpacity)));
+  root.style.setProperty('--gfx-shadow-opacity', String(pct(effectiveSettings.shadowOpacity)));
+  root.style.setProperty('--gfx-blur', n(effectiveSettings.blur, 0) + 'px');
+  root.style.setProperty('--gfx-brightness', n(effectiveSettings.brightness, 100) + '%');
+  root.style.setProperty('--gfx-contrast', n(effectiveSettings.contrast, 100) + '%');
+  const speed = Math.max(0.1, n(effectiveSettings.animationSpeed, 1));
+  const duration = Math.max(0, n(effectiveSettings.animationDuration, 280)) / speed;
   root.style.setProperty('--gfx-anim-duration', duration + 'ms');
-  root.style.setProperty('--gfx-easing', graphicsSettings.easing || 'ease-out');
-  root.style.setProperty('--gfx-radius', n(graphicsSettings.radius, 0) + 'px');
+  root.style.setProperty('--gfx-easing', effectiveSettings.easing || 'ease-out');
+  root.style.setProperty('--gfx-radius', n(effectiveSettings.radius, 0) + 'px');
   const active = document.getElementById(activeLayerId);
   if (active && !active.classList.contains('gfx-taking')) active.style.opacity = 'var(--gfx-opacity)';
 }
@@ -72,6 +83,19 @@ function applySceneLayers(scene={}){
   if (clockLayer.enabled) clock.textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 setInterval(() => { try { window.__lastScene && applySceneLayers(window.__lastScene); } catch {} }, 1000);
+
+function applySafeGuides(){
+  let guides = document.getElementById('safeGuidesOverlay');
+  if (!guides) {
+    guides = document.createElement('div');
+    guides.id = 'safeGuidesOverlay';
+    guides.innerHTML = '<div class="safe action"></div><div class="safe title"></div><div class="safe v"></div><div class="safe h"></div>';
+    document.body.appendChild(guides);
+  }
+  guides.style.display = (IS_CONTROLLER_MONITOR && uiSettings.safeGuides) ? 'block' : 'none';
+}
+async function refreshUiSettings(){ try { const r = await api('/api/ui-settings'); if(r.ok){ uiSettings = { ...uiSettings, ...r.settings }; applySafeGuides(); } } catch {} }
+
 
 function animationMs(){
   const d = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--gfx-anim-duration'));
@@ -172,7 +196,7 @@ async function render(state){
   const myRenderSeq = ++renderSeq;
   const g=outputGraphic(state)||{};
   applySceneLayers(state?.scene);
-  if(g.type==='blank'){ hideAllGraphics(); applyGraphicsSettings(graphicsSettings || {}); return; }
+  if(g.type==='blank'){ hideAllGraphics(); applyGraphicsSettings(graphicsSettings || {}, g.type); return; }
   const page=g.page||1, size=g.pageSize||10, eventId=state.eventId;
   let data;
   if(g.type==='overall') data=await api(`/api/event/${eventId}/overall?limit=${page*size}`);
@@ -181,7 +205,7 @@ async function render(state){
   if(g.type==='entries') data=await api(`/api/event/${eventId}/entries?limit=${page*size}`);
   if (myRenderSeq !== renderSeq) return; // A newer graphic was selected while this data was loading.
   const el = inactiveLayer();
-  if(!data?.ok){el.innerHTML='<div class="template-stage"><div class="template-board"><h1 class="template-title">DATA ERROR</h1></div></div>'; applyGraphicsSettings(graphicsSettings || {}); takePreparedGraphic(el, renderKey); return;}
+  if(!data?.ok){el.innerHTML='<div class="template-stage"><div class="template-board"><h1 class="template-title">DATA ERROR</h1></div></div>'; applyGraphicsSettings(graphicsSettings || {}, g.type); takePreparedGraphic(el, renderKey); return;}
   const rows=data.data.rows.slice((page-1)*size,page*size);
   const filled=[...rows]; while(filled.length<size) filled.push({});
   const subtitle = g.type==='entries' ? 'ENTRY LIST' : cleanTitle((data.data.subtitle||'FINAL OVERALL POSITIONS').replace(/^.*?(FINAL\s+OVERALL\s+POSITIONS)/i,'$1'));
@@ -190,7 +214,7 @@ async function render(state){
   if(g.type==='entries') el.innerHTML = renderEntry(title, filled, page);
   else if(g.type==='stageTimes') el.innerHTML = renderStageTimes(data.data.subtitle || `Times for Stage ${g.stageId}`, filled, page);
   else el.innerHTML = renderResult(title, filled, page, g.type);
-  applyGraphicsSettings(graphicsSettings || state.graphicsSettings || {});
+  applyGraphicsSettings(graphicsSettings || state.graphicsSettings || {}, g.type);
   takePreparedGraphic(el, renderKey);
 }
 
@@ -293,10 +317,12 @@ function renderResult(title, rows, type){
   </div>`;
 }
 
-socket.on('state', s => { window.__lastScene = s?.scene; if (s?.graphicsSettings) applyGraphicsSettings(s.graphicsSettings); applySceneLayers(s?.scene); render(s); });
-socket.on('graphicsSettings', applyGraphicsSettings);
+socket.on('state', s => { window.__lastScene = s?.scene; if (s?.uiSettings) { uiSettings = { ...uiSettings, ...s.uiSettings }; applySafeGuides(); } if (s?.graphicsSettings) applyGraphicsSettings(s.graphicsSettings, outputGraphic(s)?.type); applySceneLayers(s?.scene); render(s); });
+socket.on('graphicsSettings', s => applyGraphicsSettings(s));
+socket.on('uiSettings', s => { uiSettings = { ...uiSettings, ...s }; applySafeGuides(); });
 async function refreshSharedState(){ try { const r = await api('/api/state'); if (r.ok) await render(r.state); } catch {} }
 refreshGraphicsSettings();
+refreshUiSettings();
 refreshSharedState();
 // No continuous polling here: Socket.IO drives on-air changes. Polling was able to retrigger
 // equivalent graphics with slightly different object shapes and create intermittent flicker.

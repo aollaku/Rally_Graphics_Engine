@@ -16,6 +16,23 @@ const DEFAULT_EVENT_ID = process.env.DEFAULT_EVENT_ID || '757';
 const PUBLIC_TOKEN = process.env.PUBLIC_TOKEN || '';
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 15000);
 const SESSION_SECRET = process.env.SESSION_SECRET || 'change-this-rally-graphics-session-secret';
+const APP_VERSION = '3.0-workflow-tools';
+const errorEvents = [];
+const outputSockets = { preview: new Set(), program: new Set() };
+function recordError(kind, message, severity='red') {
+  const item = { time: new Date().toISOString(), kind, message: humanError(message), severity };
+  errorEvents.unshift(item);
+  if (errorEvents.length > 100) errorEvents.pop();
+  return item;
+}
+function humanError(message='') {
+  const m = String(message || 'Unknown problem');
+  if (/ECONNREFUSED|database|postgres|pg/i.test(m)) return 'Postgres database not online or connection refused';
+  if (/ENOTFOUND|EAI_AGAIN|network|getaddrinfo|fetch failed/i.test(m)) return 'No internet connection or rally results website cannot be reached';
+  if (/timeout|ETIMEDOUT/i.test(m)) return 'Connection is slow or timed out';
+  if (/Unauthorized|Login required/i.test(m)) return 'User session expired or login required';
+  return m.replace(/[{}[\]\"]/g, '').slice(0, 180);
+}
 
 const app = express();
 const server = http.createServer(app);
@@ -38,6 +55,7 @@ const DEFAULT_GRAPHICS_SETTINGS = {
   animationDuration: 280,
   easing: 'ease-out',
   radius: 0,
+  perGraphic: {},
   updatedAt: new Date().toISOString()
 };
 
@@ -109,6 +127,7 @@ function normaliseGraphicsSettings(input={}){
     animationDuration: num(s.animationDuration, 0, 5000, 280),
     easing: ['linear','ease','ease-in','ease-out','ease-in-out','cubic-bezier(.34,1.56,.64,1)'].includes(s.easing) ? s.easing : 'ease-out',
     radius: num(s.radius, 0, 80, 0),
+    perGraphic: typeof s.perGraphic === 'object' && s.perGraphic ? Object.fromEntries(Object.entries(s.perGraphic).slice(0,20).map(([k,v]) => [k, normaliseGraphicsSettings({ ...v, perGraphic: {} })])) : {},
     updatedAt: new Date().toISOString()
   };
 }
@@ -404,11 +423,14 @@ app.get('/api/config/export', requireLogin, async (req, res) => {
   const database = await db.exportAll();
   const config = {
     kind: 'rally-graphics-config',
-    version: 2,
+    version: 3,
+    appVersion: APP_VERSION,
     includesUsers: true,
     exportedAt: new Date().toISOString(),
     appState: sharedState,
     graphicsSettings: sharedState.graphicsSettings || DEFAULT_GRAPHICS_SETTINGS,
+    uiSettings: sharedState.uiSettings || defaultUiSettings(),
+    graphicsPresets: sharedState.graphicsPresets || [],
     database
   };
   await db.audit('export_config', { user: req.session.user.username, eventId: sharedState.eventId, includesUsers: true });
@@ -429,7 +451,9 @@ app.post('/api/config/import', requireLogin, async (req, res) => {
       ...state,
       ...incomingState,
       graphicsSettings: normaliseGraphicsSettings(incomingGraphics),
-      scene: normaliseScene(incomingState.scene || payload.scene || state.scene)
+      scene: normaliseScene(incomingState.scene || payload.scene || state.scene),
+      uiSettings: normaliseUiSettings(payload.uiSettings || incomingState.uiSettings || state.uiSettings || {}),
+      graphicsPresets: Array.isArray(payload.graphicsPresets || incomingState.graphicsPresets) ? (payload.graphicsPresets || incomingState.graphicsPresets).slice(0,100) : (state.graphicsPresets || [])
     };
     if (!state.graphic) state.graphic = { type: 'blank', stageId: 0, page: 1, pageSize: 10, title: '', updatedAt: new Date().toISOString() };
     await saveSharedState();
@@ -495,7 +519,96 @@ app.delete('/api/users/:id', requireAdmin, async (req, res) => {
   } catch (err) { res.status(400).json({ ok:false, error:err.message }); }
 });
 
-io.on('connection', async socket => socket.emit('state', await loadSharedState()));
+
+function defaultUiSettings(){
+  return {
+    operatorLock: false,
+    safeGuides: false,
+    shortcuts: {
+      take: 'Space',
+      clear: 'Escape',
+      preview: 'KeyP',
+      takePreview: 'KeyT',
+      openPreview: 'F8',
+      openOutput: 'F9'
+    }
+  };
+}
+function normaliseUiSettings(input={}){
+  const defaults = defaultUiSettings();
+  return {
+    operatorLock: Boolean(input.operatorLock ?? defaults.operatorLock),
+    safeGuides: Boolean(input.safeGuides ?? defaults.safeGuides),
+    shortcuts: { ...defaults.shortcuts, ...(input.shortcuts || {}) }
+  };
+}
+app.get('/api/ui-settings', requireLogin, async (req, res) => {
+  await loadSharedState();
+  state.uiSettings = normaliseUiSettings(state.uiSettings || {});
+  res.json({ ok:true, settings: state.uiSettings });
+});
+app.post('/api/ui-settings', requireLogin, async (req, res) => {
+  await loadSharedState();
+  state.uiSettings = normaliseUiSettings(req.body || {});
+  await saveSharedState();
+  io.emit('uiSettings', state.uiSettings);
+  io.emit('state', state);
+  res.json({ ok:true, settings: state.uiSettings });
+});
+app.get('/api/graphics-presets', requireLogin, async (req, res) => {
+  await loadSharedState();
+  state.graphicsPresets = Array.isArray(state.graphicsPresets) ? state.graphicsPresets : [];
+  res.json({ ok:true, presets: state.graphicsPresets });
+});
+app.post('/api/graphics-presets', requireLogin, async (req, res) => {
+  await loadSharedState();
+  const name = String(req.body.name || '').trim();
+  if (!name) return res.status(400).json({ ok:false, error:'Preset name required' });
+  const preset = { name, scope:req.body.scope || 'global', settings: normaliseGraphicsSettings(req.body.settings || state.graphicsSettings), updatedAt:new Date().toISOString() };
+  state.graphicsPresets = (Array.isArray(state.graphicsPresets) ? state.graphicsPresets : []).filter(p => p.name !== name);
+  state.graphicsPresets.unshift(preset);
+  state.graphicsPresets = state.graphicsPresets.slice(0,100);
+  await saveSharedState();
+  res.json({ ok:true, presets: state.graphicsPresets });
+});
+app.delete('/api/graphics-presets/:name', requireLogin, async (req, res) => {
+  await loadSharedState();
+  const name = String(req.params.name || '');
+  state.graphicsPresets = (Array.isArray(state.graphicsPresets) ? state.graphicsPresets : []).filter(p => p.name !== name);
+  await saveSharedState();
+  res.json({ ok:true, presets: state.graphicsPresets });
+});
+app.get('/api/system/status', requireLogin, async (req, res) => {
+  const database = await db.status();
+  let internet = { ok:true, warning:false, message:'Rally data connection looks OK' };
+  try { await scraper.getEventInfo(state.eventId || DEFAULT_EVENT_ID, 1); }
+  catch (err) { internet = { ok:false, warning:true, message: humanError(err.message) }; recordError('internet', err.message, 'orange'); }
+  const shared = await loadSharedState();
+  const socketCount = io.engine.clientsCount || 0;
+  const previewOnline = outputSockets.preview.size > 0;
+  const programOnline = outputSockets.program.size > 0;
+  const cfg = { version: APP_VERSION, exportedConfigVersion: 3 };
+  res.json({ ok:true, version: APP_VERSION, app:{ok:true,message:'Application API online'}, database, internet, outputs:{ sockets: socketCount, previewOnline, programOnline, preview: previewOnline ? 'Preview output connected' : 'Preview page not open', program: programOnline ? 'Program output connected' : 'Program output page not open' }, config:cfg, state:shared });
+});
+app.get('/api/error-log', requireLogin, async (req, res) => {
+  const database = await db.status();
+  const items = [...errorEvents];
+  if (!database.ok) items.unshift({ time:new Date().toISOString(), kind:'database', message:humanError(database.message || 'Postgres database not online'), severity:'red' });
+  res.json({ ok:true, errors:items.slice(0,50) });
+});
+app.post('/api/error-log/clear', requireLogin, (req, res) => { errorEvents.length = 0; res.json({ ok:true }); });
+
+app.use((err, req, res, next) => { recordError('server', err.message || err, 'red'); res.status(500).json({ ok:false, error:humanError(err.message || err) }); });
+
+io.on('connection', async socket => {
+  socket.emit('state', await loadSharedState());
+  socket.on('outputMode', mode => {
+    if (mode === 'preview' || mode === 'program') {
+      outputSockets[mode].add(socket.id);
+      socket.on('disconnect', () => outputSockets[mode].delete(socket.id));
+    }
+  });
+});
 
 (async () => {
   try { await db.init(); await loadSharedState(); await saveSharedState(); console.log(`Database initialised on ${INSTANCE_ID}:`, await db.status()); }

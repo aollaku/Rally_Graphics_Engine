@@ -23,7 +23,7 @@ function outputOrigin(){
   return `http://${host}:8080`;
 }
 function outputUrl(){ return outputOrigin() + '/output/live' + tokenPart; }
-function previewUrl(){ return location.origin + '/preview/live' + tokenPart; }
+function previewUrl(){ return location.origin + '/preview/live' + (tokenPart ? tokenPart + '&controllerPreview=1' : '?controllerPreview=1'); }
 function previewHttpUrl(){ const host = location.hostname || 'localhost'; return `http://${host}:8080/preview/live${tokenPart}`; }
 function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
 function totalFor(type, stageId=0){ return type === 'overall' ? totals.overall : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
@@ -123,13 +123,36 @@ function selectedTakeTarget(){
   if (preview) return 'preview';
   return 'program';
 }
-async function take(type=selectedType, stageId=selectedStage, page=selectedPage){
+
+// Two-step graphics workflow:
+//   1st press on a graphic button = load to Preview only.
+//   2nd press on the same graphic/page = TAKE that graphic to Program/output.
+// This gives the operator a safe preview by default while still allowing fast double-press to air.
+function graphicPressKey(type, stageId, page){
+  const normalizedStage = (type === 'stage' || type === 'stageTimes') ? Number(stageId || selectedStage || 1) : 0;
+  return [type || selectedType, normalizedStage, Number(page || selectedPage || 1), Number(qs('#pageSize')?.value || pageSize || 10)].join('|');
+}
+function previewGraphicKey(){
+  const g = state?.scene?.preview || {};
+  if(!g.type || g.type === 'blank') return '';
+  const normalizedStage = (g.type === 'stage' || g.type === 'stageTimes') ? Number(g.stageId || 1) : 0;
+  return [g.type, normalizedStage, Number(g.page || 1), Number(g.pageSize || pageSize || 10)].join('|');
+}
+function setTwoStepHint(message){
+  const el = qs('#twoStepHint') || qs('#eventInfo');
+  if(el) el.textContent = message;
+}
+async function take(type=selectedType, stageId=selectedStage, page=selectedPage, forcedTarget=null){
   selectedType=type; selectedPage=Math.max(1, Number(page||1));
   if(type==='stage' || type==='stageTimes') selectedStage=Number(stageId||selectedStage||1);
   if(type!=='stage' && type!=='stageTimes') stageId=0;
   pageSize = Number(qs('#pageSize')?.value || 10);
   updateActive(); renderPageButtons();
-  await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target:selectedTakeTarget()})});
+
+  const key = graphicPressKey(type, selectedStage, selectedPage);
+  let target = forcedTarget || (key === previewGraphicKey() ? 'program' : 'preview');
+  await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target})});
+  setTwoStepHint(target === 'preview' ? 'Loaded to Preview. Press the same button again to send it to Live Output.' : 'Sent to Live Output.');
   setLastUpdated();
 }
 async function clearGraphic(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank',stageId:selectedStage,page:1,pageSize,target:selectedTakeTarget()})}); setLastUpdated(); }
@@ -477,3 +500,197 @@ function setupSceneManager(){
 }
 socket.on('state', s=>{ if(s?.scene){ sceneState=s.scene; renderSceneManager(); } });
 window.addEventListener('DOMContentLoaded', setupSceneManager);
+
+// ===== Workflow optimisation pack: undo/redo, presets, per-graphic settings, lock mode, health LEDs, errors, shortcuts =====
+const WORKFLOW_DEFAULT_SHORTCUTS = {
+  take: 'Space',
+  clear: 'Escape',
+  preview: 'KeyP',
+  takePreview: 'KeyT',
+  openPreview: 'F8',
+  openOutput: 'F9'
+};
+const SHORTCUT_LABELS = {
+  take: 'Take current graphic to selected target',
+  clear: 'Clear selected target',
+  preview: 'Send current graphic to Preview',
+  takePreview: 'TAKE Preview → Program',
+  openPreview: 'Open Preview page',
+  openOutput: 'Open Program Output page'
+};
+let uiSettings = { operatorLock:false, safeGuides:false, shortcuts:{...WORKFLOW_DEFAULT_SHORTCUTS} };
+let allGraphicsSettings = { ...graphicsDefaults, perGraphic:{} };
+let currentGsScope = 'global';
+let gsUndoStack = [];
+let gsRedoStack = [];
+let gsPresets = [];
+let recordingShortcut = null;
+function cloneObj(v){ return JSON.parse(JSON.stringify(v || {})); }
+function stripPerGraphic(s){ const { perGraphic, updatedAt, ...rest } = s || {}; return { ...graphicsDefaults, ...rest }; }
+function settingsForScope(scope=currentGsScope){
+  allGraphicsSettings = { ...graphicsDefaults, ...(allGraphicsSettings || {}), perGraphic: (allGraphicsSettings && allGraphicsSettings.perGraphic) || {} };
+  if (scope && scope !== 'global') return { ...stripPerGraphic(allGraphicsSettings), ...(allGraphicsSettings.perGraphic?.[scope] || {}) };
+  return stripPerGraphic(allGraphicsSettings);
+}
+function pushGsUndo(){ gsUndoStack.push(cloneObj(graphicsSettings)); if(gsUndoStack.length>50) gsUndoStack.shift(); gsRedoStack.length=0; }
+function setDesignerDisabled(disabled){
+  qsa('#graphicsSettingsCard input, #graphicsSettingsCard select, #graphicsSettingsCard button').forEach(el => {
+    if (['operatorLock','safeGuides','gsScope','gsUndo','gsRedo','gsPresetSelect','gsLoadPreset'].includes(el.id)) return;
+    el.disabled = !!disabled;
+  });
+  const card=qs('#graphicsSettingsCard'); if(card) card.classList.toggle('locked', !!disabled);
+}
+renderGraphicsSettings = function(){
+  qsa('[data-gs]').forEach(input => {
+    const key = input.dataset.gs;
+    if (graphicsSettings[key] === undefined) return;
+    input.value = graphicsSettings[key];
+    const out = qs(`#gs_${key}_value`);
+    if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
+  });
+  const scopeSel = qs('#gsScope'); if(scopeSel) scopeSel.value = currentGsScope;
+  setDesignerDisabled(uiSettings.operatorLock);
+};
+loadGraphicsSettings = async function(){
+  try {
+    const r = await api('/api/graphics-settings');
+    if (r.ok) allGraphicsSettings = { ...graphicsDefaults, ...r.settings, perGraphic: r.settings?.perGraphic || {} };
+    graphicsSettings = settingsForScope(currentGsScope);
+    renderGraphicsSettings();
+  } catch {}
+};
+saveGraphicsSettings = async function(immediate=false){
+  if (graphicsSaveTimer) clearTimeout(graphicsSaveTimer);
+  const run = async () => {
+    try {
+      allGraphicsSettings = { ...graphicsDefaults, ...(allGraphicsSettings || {}), perGraphic: allGraphicsSettings?.perGraphic || {} };
+      if (currentGsScope === 'global') {
+        allGraphicsSettings = { ...allGraphicsSettings, ...stripPerGraphic(graphicsSettings) };
+      } else {
+        allGraphicsSettings.perGraphic[currentGsScope] = stripPerGraphic(graphicsSettings);
+      }
+      const r = await api('/api/graphics-settings', { method:'POST', body: JSON.stringify(allGraphicsSettings) });
+      if (r.ok) allGraphicsSettings = { ...graphicsDefaults, ...r.settings, perGraphic:r.settings?.perGraphic || {} };
+      setLastUpdated();
+    } catch (err) { console.warn('Could not save graphics settings', err); }
+  };
+  if (immediate) return run();
+  graphicsSaveTimer = setTimeout(run, 120);
+};
+async function loadUiSettings(){
+  try { const r = await api('/api/ui-settings'); if(r.ok) uiSettings = { ...uiSettings, ...r.settings, shortcuts:{...WORKFLOW_DEFAULT_SHORTCUTS, ...(r.settings.shortcuts||{})} }; } catch {}
+  qs('#operatorLock') && (qs('#operatorLock').checked = !!uiSettings.operatorLock);
+  qs('#safeGuides') && (qs('#safeGuides').checked = !!uiSettings.safeGuides);
+  setDesignerDisabled(uiSettings.operatorLock);
+  renderShortcuts();
+}
+async function saveUiSettings(){
+  try { await api('/api/ui-settings', { method:'POST', body:JSON.stringify(uiSettings) }); } catch(err){ console.warn('Could not save UI settings', err); }
+}
+function keyDisplay(code){ return String(code||'').replace(/^Key/,'').replace(/^Digit/,'').replace('Space','Space Bar').replace('Escape','Esc'); }
+function renderShortcuts(){
+  const list=qs('#shortcutList'); if(!list) return;
+  list.innerHTML = Object.entries(SHORTCUT_LABELS).map(([action,label]) => `<div class="shortcutRow"><strong>${label}</strong><button class="shortcutKey" data-shortcut-action="${action}">${keyDisplay(uiSettings.shortcuts[action])}</button></div>`).join('');
+  qsa('[data-shortcut-action]').forEach(btn => btn.onclick = () => { recordingShortcut = btn.dataset.shortcutAction; btn.textContent = 'Press keys...'; btn.classList.add('recording'); });
+}
+function shortcutAction(action){
+  if (document.activeElement && ['INPUT','SELECT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+  if(action==='take') take();
+  if(action==='clear') clearGraphic();
+  if(action==='preview') previewCurrent();
+  if(action==='takePreview') takePreviewToProgram();
+  if(action==='openPreview') openPreview();
+  if(action==='openOutput') openOutput();
+}
+function setupShortcutKeys(){
+  document.addEventListener('keydown', ev => {
+    if (recordingShortcut) {
+      ev.preventDefault();
+      uiSettings.shortcuts[recordingShortcut] = ev.code;
+      recordingShortcut = null;
+      renderShortcuts();
+      saveUiSettings();
+      return;
+    }
+    const hit = Object.entries(uiSettings.shortcuts || {}).find(([_, code]) => code === ev.code);
+    if (hit) { ev.preventDefault(); shortcutAction(hit[0]); }
+  });
+}
+async function loadGraphicsPresets(){
+  try { const r=await api('/api/graphics-presets'); if(r.ok) gsPresets = r.presets || []; } catch {}
+  const sel=qs('#gsPresetSelect'); if(sel) sel.innerHTML = gsPresets.map(p=>`<option value="${String(p.name).replace(/"/g,'&quot;')}">${p.name} (${p.scope || 'global'})</option>`).join('') || '<option value="">No presets saved</option>';
+}
+async function saveNamedPreset(){
+  const name=qs('#gsPresetName')?.value.trim(); if(!name) return alert('Enter a preset name first');
+  const r=await api('/api/graphics-presets',{method:'POST',body:JSON.stringify({name, scope:currentGsScope, settings:graphicsSettings})});
+  if(!r.ok) return alert(r.error || 'Could not save preset');
+  gsPresets=r.presets||[]; await loadGraphicsPresets(); alert('Preset saved');
+}
+async function loadNamedPreset(){
+  const name=qs('#gsPresetSelect')?.value; const p=gsPresets.find(x=>x.name===name); if(!p) return;
+  pushGsUndo(); graphicsSettings = { ...graphicsSettings, ...stripPerGraphic(p.settings) }; renderGraphicsSettings(); await saveGraphicsSettings(true);
+}
+async function deleteNamedPreset(){
+  const name=qs('#gsPresetSelect')?.value; if(!name || !confirm('Delete this preset?')) return;
+  const r=await fetch(withToken('/api/graphics-presets/'+encodeURIComponent(name)), { method:'DELETE' }).then(x=>x.json());
+  if(r.ok){ gsPresets=r.presets||[]; await loadGraphicsPresets(); }
+}
+function setupWorkflowDesigner(){
+  qsa('[data-gs]').forEach(input => {
+    input.addEventListener('pointerdown', pushGsUndo, { once:false });
+    input.addEventListener('focus', () => { input.dataset.beforeValue = input.value; });
+    input.addEventListener('change', () => { if(input.dataset.beforeValue !== input.value) pushGsUndo(); });
+  });
+  qs('#gsScope') && (qs('#gsScope').onchange = async e => { await saveGraphicsSettings(true); currentGsScope=e.target.value; graphicsSettings=settingsForScope(currentGsScope); renderGraphicsSettings(); });
+  qs('#gsUndo') && (qs('#gsUndo').onclick = async () => { if(!gsUndoStack.length) return; gsRedoStack.push(cloneObj(graphicsSettings)); graphicsSettings=gsUndoStack.pop(); renderGraphicsSettings(); await saveGraphicsSettings(true); });
+  qs('#gsRedo') && (qs('#gsRedo').onclick = async () => { if(!gsRedoStack.length) return; gsUndoStack.push(cloneObj(graphicsSettings)); graphicsSettings=gsRedoStack.pop(); renderGraphicsSettings(); await saveGraphicsSettings(true); });
+  qs('#operatorLock') && (qs('#operatorLock').onchange = async e => { uiSettings.operatorLock=e.target.checked; setDesignerDisabled(uiSettings.operatorLock); await saveUiSettings(); });
+  qs('#safeGuides') && (qs('#safeGuides').onchange = async e => { uiSettings.safeGuides=e.target.checked; await saveUiSettings(); });
+  qs('#gsSavePreset') && (qs('#gsSavePreset').onclick = saveNamedPreset);
+  qs('#gsLoadPreset') && (qs('#gsLoadPreset').onclick = loadNamedPreset);
+  qs('#gsDeletePreset') && (qs('#gsDeletePreset').onclick = deleteNamedPreset);
+}
+function ledClass(status){ if(status==='green' || status===true) return 'green'; if(status==='orange') return 'orange'; return 'red'; }
+function setLed(id, status, text){ const led=qs('#'+id+'Led'); const tx=qs('#'+id+'Text'); if(led) led.className='led '+ledClass(status); if(tx) tx.textContent=text; }
+async function refreshHealth(){
+  try {
+    const r=await api('/api/system/status');
+    setLed('healthApi', r.ok?'green':'red', r.app?.message || 'Application API online');
+    setLed('dashApi', r.ok?'green':'red', r.app?.message || 'Online');
+    const dbOk=!!r.database?.ok; const dbWarn=r.database?.enabled===false;
+    setLed('healthDb', dbOk?'green':(dbWarn?'orange':'red'), dbOk?'Online':(r.database?.message || 'Postgres database not online'));
+    setLed('dashDb', dbOk?'green':(dbWarn?'orange':'red'), dbOk?'Online':(r.database?.message || 'Warning'));
+    setLed('healthInternet', r.internet?.ok?'green':(r.internet?.warning?'orange':'red'), r.internet?.message || 'Checking');
+    setLed('healthPreview', r.outputs?.previewOnline?'green':'orange', r.outputs?.preview || 'Open /preview page');
+    setLed('healthProgram', r.outputs?.programOnline?'green':'orange', r.outputs?.program || 'Open /output page');
+    setLed('healthConfig', 'green', `${r.version || 'unknown'} / config v${r.config?.exportedConfigVersion || 3}`);
+  } catch(err){ setLed('healthApi','red','Application API offline'); }
+}
+async function refreshErrors(){
+  const list=qs('#errorList'); if(!list) return;
+  try {
+    const r=await api('/api/error-log'); const items=r.errors||[];
+    list.innerHTML = items.length ? items.map(e=>`<div class="errorItem ${e.severity||'orange'}"><span class="led ${e.severity||'orange'}"></span><div><strong>${e.kind||'system'}</strong><p>${e.message||'Unknown issue'}</p><small>${new Date(e.time).toLocaleString()}</small></div></div>`).join('') : '<div class="errorEmpty">No errors reported.</div>';
+  } catch(err){ list.innerHTML='<div class="errorItem red"><span class="led red"></span><div><strong>Application API</strong><p>Cannot read error list.</p></div></div>'; }
+}
+async function clearErrorList(){ await api('/api/error-log/clear',{method:'POST',body:'{}'}); refreshErrors(); }
+window.addEventListener('DOMContentLoaded', () => {
+  setupWorkflowDesigner();
+  loadUiSettings();
+  loadGraphicsPresets();
+  setupShortcutKeys();
+  refreshHealth();
+  refreshErrors();
+  qs('#refreshHealth') && (qs('#refreshHealth').onclick=refreshHealth);
+  qs('#refreshErrors') && (qs('#refreshErrors').onclick=refreshErrors);
+  qs('#clearErrors') && (qs('#clearErrors').onclick=clearErrorList);
+  qs('#saveShortcuts') && (qs('#saveShortcuts').onclick=saveUiSettings);
+  qs('#resetShortcuts') && (qs('#resetShortcuts').onclick=async()=>{ uiSettings.shortcuts={...WORKFLOW_DEFAULT_SHORTCUTS}; renderShortcuts(); await saveUiSettings(); });
+  setInterval(refreshHealth, 30000);
+});
+window.addEventListener('DOMContentLoaded', () => {
+  qsa('.nav[data-target]').forEach(btn => btn.addEventListener('click', () => {
+    if(btn.dataset.target === 'health') scrollToCard('#healthCard');
+    if(btn.dataset.target === 'logs') scrollToCard('#errorCard');
+  }));
+});
