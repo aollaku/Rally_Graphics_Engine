@@ -129,3 +129,95 @@ html,body{
 .compact-title-main,.compact-title-stage{display:block;text-align:center;text-transform:uppercase;font-weight:950;line-height:1.02;}
 .compact-title-main{font-size:1.02vw;}
 .compact-title-stage{font-size:1.02vw;margin-top:.08vh;}
+
+/* Graphics Designer live controls */
+:root{
+  --gfx-scale:1;
+  --gfx-x:0px;
+  --gfx-y:0px;
+  --gfx-width:100%;
+  --gfx-height:100%;
+  --gfx-opacity:1;
+  --gfx-blur:0px;
+  --gfx-brightness:100%;
+  --gfx-contrast:100%;
+  --gfx-anim-duration:280ms;
+  --gfx-easing:ease-out;
+  --gfx-bg-opacity:1;
+  --gfx-border-opacity:1;
+  --gfx-shadow-opacity:0;
+  --gfx-radius:0px;
+}
+.gfx{
+  right:auto;
+  width:var(--gfx-width);
+  height:var(--gfx-height);
+  opacity:var(--gfx-opacity);
+  transform-origin:top left;
+  transform:translate(var(--gfx-x),var(--gfx-y)) scale(var(--gfx-scale));
+  filter:blur(var(--gfx-blur)) brightness(var(--gfx-brightness)) contrast(var(--gfx-contrast));
+  -webkit-filter:blur(var(--gfx-blur)) brightness(var(--gfx-brightness)) contrast(var(--gfx-contrast));
+  animation:none;
+  will-change:opacity,transform,filter;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+}
+.gfx.gfx-animate-in{
+  animation:gfxDesignerIn var(--gfx-anim-duration) var(--gfx-easing) both;
+}
+.template-table,.compact-ss{background:rgba(38,36,33,var(--gfx-bg-opacity))!important;box-shadow:0 12px 35px rgba(0,0,0,var(--gfx-shadow-opacity))!important;border-radius:var(--gfx-radius)!important;overflow:hidden;}
+.compact-ss,.compact-row,.compact-head,.compact-pos,.compact-crew{border-color:rgba(23,23,23,var(--gfx-border-opacity))!important;}
+.template-row .cell,.compact-row,.compact-time,.compact-crew{border-radius:calc(var(--gfx-radius) * .35)!important;}
+@keyframes gfxDesignerIn{from{opacity:0}to{opacity:var(--gfx-opacity)}}
+/* v38 flicker fix: settings changes no longer restart animations; intro animation only runs when a new graphic is taken. */
+
+
+/* v39 double-buffer anti-flicker output layers */
+.gfx-layer{
+  position:absolute!important;
+  left:0!important;top:0!important;right:auto!important;bottom:auto!important;
+  width:var(--gfx-width)!important;height:var(--gfx-height)!important;
+  opacity:0;visibility:hidden;
+  animation:none!important;
+  transition:none;
+  transform-origin:top left;
+  transform:translate(var(--gfx-x),var(--gfx-y)) scale(var(--gfx-scale)) translateZ(0)!important;
+  filter:blur(var(--gfx-blur)) brightness(var(--gfx-brightness)) contrast(var(--gfx-contrast));
+  -webkit-filter:blur(var(--gfx-blur)) brightness(var(--gfx-brightness)) contrast(var(--gfx-contrast));
+  will-change:opacity,transform,filter;
+  contain:layout paint style;
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  pointer-events:none;
+}
+.gfx-layer.gfx-active{visibility:visible;opacity:var(--gfx-opacity);z-index:2;}
+.gfx-layer.gfx-inactive{visibility:hidden;opacity:0;z-index:1;}
+.gfx-layer.gfx-prep{visibility:hidden;opacity:0;z-index:3;}
+.gfx-layer.gfx-taking{visibility:visible;z-index:4;}
+.gfx-layer.gfx-hold{visibility:visible;opacity:var(--gfx-opacity);z-index:2;}
+.gfx-layer *{animation-fill-mode:both;}
+.gfx-animate-in{animation:none!important;}
+
+
+/* v40 anti-flicker: active layer is never class-cleaned at animation end; inactive layer is hidden without display:none during live swaps. */
+.gfx-layer.gfx-inactive{display:block!important;}
+
+/* Scene engine overlays */
+.gfx-layer { opacity: calc(var(--gfx-opacity, 1) * var(--scene-main-opacity, 1)); }
+.scene-bug, .scene-clock {
+  position: fixed;
+  z-index: 9999;
+  right: 48px;
+  font-family: Arial, Helvetica, sans-serif;
+  color: white;
+  background: rgba(0,0,0,.72);
+  border: 1px solid rgba(255,255,255,.25);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  pointer-events: none;
+  text-shadow: 0 2px 6px rgba(0,0,0,.5);
+}
+.scene-bug { top: 36px; }
+.scene-clock { bottom: 36px; font-variant-numeric: tabular-nums; }

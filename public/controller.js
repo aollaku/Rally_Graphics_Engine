@@ -24,6 +24,7 @@ function outputOrigin(){
 }
 function outputUrl(){ return outputOrigin() + '/output/live' + tokenPart; }
 function previewUrl(){ return location.origin + '/preview/live' + tokenPart; }
+function previewHttpUrl(){ const host = location.hostname || 'localhost'; return `http://${host}:8080/preview/live${tokenPart}`; }
 function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
 function totalFor(type, stageId=0){ return type === 'overall' ? totals.overall : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
 function totalPagesFor(type, stageId=0){ return Math.max(1, Math.ceil((totalFor(type, stageId) || 0) / pageSize)); }
@@ -31,7 +32,6 @@ function setLastUpdated(){ const el=qs('#lastUpdated'); if(el) el.textContent = 
 function setOutputFields(){
   const out = qs('#outputUrl'); if(out) out.value = outputUrl();
   const frame = qs('#previewFrame'); if(frame && frame.src !== previewUrl()) frame.src = previewUrl();
-  const side = qs('#outputLinkSide'); if(side) side.href = outputUrl();
   const tablet = qs('#tabletLink'); if(tablet) tablet.href = '/tablet' + tokenPart;
 }
 
@@ -53,11 +53,11 @@ function updateActive(){
   const sel=qs('#stageSelect'); if(sel) sel.value=String(selectedStage);
   qsa('#stageButtons button').forEach((b,i)=>b.classList.toggle('active', (selectedType==='stage' || selectedType==='stageTimes') && i+1===selectedStage));
   const p=qs('#pageNo'); if(p) p.textContent='Page '+selectedPage;
-  const total=qs('#totalRows'); if(total) total.textContent = `${totalFor(selectedType, selectedStage) || '--'} rows`;
+  qsa('.totalRows').forEach(total => total.textContent = `${totalFor(selectedType, selectedStage) || '--'} rows`);
 }
 
 function renderPageButtons(){
-  const boxes = qsa('#pageButtons');
+  const boxes = qsa('.pageButtons');
   boxes.forEach(box => {
     box.innerHTML='';
     const pages = totalPagesFor(selectedType, selectedStage);
@@ -116,17 +116,25 @@ async function loadEvent(){
   setLastUpdated();
 }
 
+function selectedTakeTarget(){
+  const preview = !!qs('#targetPreview')?.checked;
+  const output = !!qs('#targetOutput')?.checked;
+  if (preview && output) return 'both';
+  if (preview) return 'preview';
+  return 'program';
+}
 async function take(type=selectedType, stageId=selectedStage, page=selectedPage){
   selectedType=type; selectedPage=Math.max(1, Number(page||1));
   if(type==='stage' || type==='stageTimes') selectedStage=Number(stageId||selectedStage||1);
   if(type!=='stage' && type!=='stageTimes') stageId=0;
   pageSize = Number(qs('#pageSize')?.value || 10);
   updateActive(); renderPageButtons();
-  await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage)})});
+  await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target:selectedTakeTarget()})});
   setLastUpdated();
 }
-async function clearGraphic(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank',stageId:selectedStage,page:1,pageSize})}); setLastUpdated(); }
+async function clearGraphic(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank',stageId:selectedStage,page:1,pageSize,target:selectedTakeTarget()})}); setLastUpdated(); }
 function openOutput(){ window.open(outputUrl(), '_blank', 'noopener'); }
+function openPreview(){ window.open(previewHttpUrl(), '_blank', 'noopener'); }
 async function copyUrl(){ await navigator.clipboard.writeText(outputUrl()); const btn=qs('#copyUrl'); if(btn){ const old=btn.textContent; btn.textContent='Copied'; setTimeout(()=>btn.textContent=old,1000); } }
 function startAutoRefresh(){ if(autoTimer) clearInterval(autoTimer); const chk=qs('#autoRefresh'); if(!chk || !chk.checked) return; const ms=Number(qs('#refreshEvery')?.value || 30000); autoTimer=setInterval(()=>loadTotalsForSelection(false), ms); }
 
@@ -160,9 +168,8 @@ qsa('[data-target="stage"]').forEach(b=>b.onclick=()=>{selectedType='stage'; sel
 qs('#saveEvent') && (qs('#saveEvent').onclick=loadEvent);
 qs('#refreshData') && (qs('#refreshData').onclick=()=>loadTotalsForSelection(true));
 qs('#clearGraphic') && (qs('#clearGraphic').onclick=clearGraphic);
-qs('#clearGraphic2') && (qs('#clearGraphic2').onclick=clearGraphic);
 qs('#openOutput') && (qs('#openOutput').onclick=openOutput);
-qs('#openOutput2') && (qs('#openOutput2').onclick=openOutput);
+qs('#openPreview') && (qs('#openPreview').onclick=openPreview);
 qs('#copyUrl') && (qs('#copyUrl').onclick=copyUrl);
 qs('#clearCache') && (qs('#clearCache').onclick=()=>loadEvent());
 qs('#autoRefresh') && (qs('#autoRefresh').onchange=startAutoRefresh);
@@ -175,25 +182,54 @@ qs('#autoRundown') && (qs('#autoRundown').onclick=toggleAutoRundown);
 setOutputFields(); initStages(); updateActive(); loadEvent(); startAutoRefresh();
 
 async function refreshAdmin(){
-  const dbText = qs('#dbStatus'), backupText = qs('#backupStatus'), dbDot = qs('#dbDot'), backupDot = qs('#backupDot'), backupSelect = qs('#backupSelect');
+  const dbText = qs('#dbStatus'), dbDot = qs('#dbDot');
   try {
     const st = await api('/api/admin/status');
-    if (st.ok) { const dbOk = !!st.database?.ok; if (dbText) dbText.textContent = dbOk ? 'Connected' : (st.database?.message || 'Not connected'); if (dbDot) dbDot.className = 'dot ' + (dbOk ? 'ok' : 'bad'); if (backupText) backupText.textContent = `${st.backupCount || 0} backup file(s)`; if (backupDot) backupDot.className = 'dot ' + ((st.backupCount || 0) > 0 ? 'ok' : ''); }
-    const backups = await api('/api/backups');
-    if (backupSelect && backups.ok) { backupSelect.innerHTML = ''; (backups.files || []).forEach(f => { const o=document.createElement('option'); o.value=f; o.textContent=f; backupSelect.appendChild(o); }); if (!backups.files?.length) { const o=document.createElement('option'); o.textContent='No backups yet'; o.value=''; backupSelect.appendChild(o); } }
+    if (st.ok) {
+      const dbOk = !!st.database?.ok;
+      if (dbText) dbText.textContent = dbOk ? 'Connected' : (st.database?.message || 'Not connected');
+      if (dbDot) dbDot.className = 'dot ' + (dbOk ? 'ok' : 'bad');
+    }
   } catch (err) { if (dbText) dbText.textContent = err.message; if (dbDot) dbDot.className = 'dot bad'; }
 }
 function exportJson(){ window.open(withToken('/api/export'), '_blank', 'noopener'); }
 function importJson(){ qs('#importFile')?.click(); }
 async function handleImportFile(ev){
   const file = ev.target.files?.[0]; if (!file) return;
-  const mode = qs('#importMode')?.value || 'merge';
-  const text = await file.text(); const payload = JSON.parse(text);
-  const res = await api('/api/import?mode='+encodeURIComponent(mode), { method:'POST', body: JSON.stringify(payload) });
-  alert(res.ok ? `DB import complete (${res.result.mode})` : ('Import failed: ' + res.error)); await refreshAdmin(); await loadEvent();
+  try {
+    const mode = qs('#importMode')?.value || 'merge';
+    const text = await file.text(); const payload = JSON.parse(text);
+    const res = await api('/api/import?mode='+encodeURIComponent(mode), { method:'POST', body: JSON.stringify(payload) });
+    alert(res.ok ? `DB import complete (${res.result.mode})` : ('Import failed: ' + res.error)); await refreshAdmin(); await loadEvent();
+  } catch (err) { alert('Import failed: ' + err.message); }
+  ev.target.value = '';
 }
-function downloadBackup(){ const file = qs('#backupSelect')?.value; if (!file) return alert('No backup selected'); window.open(withToken('/api/backups/' + encodeURIComponent(file)), '_blank', 'noopener'); }
-window.addEventListener('DOMContentLoaded', () => { qs('#refreshAdmin')?.addEventListener('click', refreshAdmin); qs('#exportJson')?.addEventListener('click', exportJson); qs('#importJson')?.addEventListener('click', importJson); qs('#importFile')?.addEventListener('change', handleImportFile); qs('#downloadBackup')?.addEventListener('click', downloadBackup); refreshAdmin(); });
+function exportConfig(){ window.open(withToken('/api/config/export'), '_blank', 'noopener'); }
+function importConfig(){ qs('#configFile')?.click(); }
+async function handleConfigFile(ev){
+  const file = ev.target.files?.[0]; if (!file) return;
+  try {
+    const mode = qs('#configImportMode')?.value || 'merge';
+    const text = await file.text(); const payload = JSON.parse(text);
+    if (payload.kind && payload.kind !== 'rally-graphics-config') {
+      if (!confirm('This does not look like a Rally Graphics config file. Import anyway?')) return;
+    }
+    const res = await api('/api/config/import?mode='+encodeURIComponent(mode), { method:'POST', body: JSON.stringify(payload) });
+    alert(res.ok ? 'Full config imported successfully' : ('Config import failed: ' + res.error));
+    await refreshAdmin(); await loadEvent(); await loadGraphicsSettings();
+  } catch (err) { alert('Config import failed: ' + err.message); }
+  ev.target.value = '';
+}
+window.addEventListener('DOMContentLoaded', () => {
+  qs('#refreshAdmin')?.addEventListener('click', refreshAdmin);
+  qs('#exportJson')?.addEventListener('click', exportJson);
+  qs('#importJson')?.addEventListener('click', importJson);
+  qs('#importFile')?.addEventListener('change', handleImportFile);
+  qs('#exportConfig')?.addEventListener('click', exportConfig);
+  qs('#importConfig')?.addEventListener('click', importConfig);
+  qs('#configFile')?.addEventListener('change', handleConfigFile);
+  refreshAdmin();
+});
 
 // Login / user management (desktop only)
 let currentUser = null;
@@ -274,9 +310,153 @@ qsa('.nav[data-target]').forEach(btn => {
     qsa('.nav').forEach(n=>n.classList.remove('active'));
     btn.classList.add('active');
     const target = btn.dataset.target;
-    if(target === 'dashboard') scrollToCard('.eventCard');
-    if(target === 'stage') { selectedType='stage'; selectedPage=1; updateActive(); await loadTotalsForSelection(false); scrollToCard('.outputCard'); }
-    if(target === 'users') { await loadMe(); await loadUsers(); scrollToCard('#userCard'); }
+    if(target === 'dashboard') scrollToCard('#dashboardCard');
+    if(target === 'graphics') scrollToCard('#graphicsCard');
+    if(target === 'scenes') scrollToCard('#sceneManagerCard');
+    if(target === 'outputs') scrollToCard('#graphicsCard');
+    if(target === 'designer') scrollToCard('#graphicsSettingsCard');
+    if(target === 'data') scrollToCard('#dataCard');
+    if(target === 'settings') { await loadMe(); await loadUsers(); scrollToCard('#userCard'); }
   });
 });
 
+
+// Graphics Settings sub-tab
+const graphicsDefaults = {
+  scale: 1, x: 0, y: 0, width: 1920, height: 1080,
+  opacity: 100, backgroundOpacity: 100, borderOpacity: 100, shadowOpacity: 0,
+  blur: 0, brightness: 100, contrast: 100,
+  animationSpeed: 1, animationDuration: 280, easing: 'ease-out', radius: 0
+};
+let graphicsSettings = { ...graphicsDefaults };
+let graphicsSaveTimer = null;
+function graphicsValueText(key, value){
+  const n = Number(value);
+  if (key === 'scale') return Math.round(n * 100) + '%';
+  if (['x','y','width','height','blur','radius'].includes(key)) return Math.round(n) + 'px';
+  if (['opacity','backgroundOpacity','borderOpacity','shadowOpacity','brightness','contrast'].includes(key)) return Math.round(n) + '%';
+  if (key === 'animationSpeed') return n.toFixed(1) + 'x';
+  if (key === 'animationDuration') return Math.round(n) + 'ms';
+  return String(value);
+}
+function renderGraphicsSettings(){
+  qsa('[data-gs]').forEach(input => {
+    const key = input.dataset.gs;
+    if (graphicsSettings[key] === undefined) return;
+    input.value = graphicsSettings[key];
+    const out = qs(`#gs_${key}_value`);
+    if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
+  });
+}
+async function saveGraphicsSettings(immediate=false){
+  if (graphicsSaveTimer) clearTimeout(graphicsSaveTimer);
+  const run = async () => {
+    try { await api('/api/graphics-settings', { method:'POST', body: JSON.stringify(graphicsSettings) }); setLastUpdated(); }
+    catch (err) { console.warn('Could not save graphics settings', err); }
+  };
+  if (immediate) return run();
+  graphicsSaveTimer = setTimeout(run, 120);
+}
+async function loadGraphicsSettings(){
+  try {
+    const r = await api('/api/graphics-settings');
+    if (r.ok) graphicsSettings = { ...graphicsDefaults, ...r.settings };
+    renderGraphicsSettings();
+  } catch {}
+}
+function setupGraphicsSettings(){
+  qsa('.designerTab').forEach(btn => btn.onclick = () => {
+    qsa('.designerTab').forEach(b => b.classList.toggle('active', b === btn));
+    qsa('.designerPanel').forEach(p => p.classList.toggle('active', p.dataset.designerPanel === btn.dataset.designerTab));
+  });
+  qsa('[data-gs]').forEach(input => {
+    const handler = () => {
+      const key = input.dataset.gs;
+      graphicsSettings[key] = input.type === 'number' || input.type === 'range' ? Number(input.value) : input.value;
+      const out = qs(`#gs_${key}_value`); if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
+      saveGraphicsSettings(false);
+    };
+    input.addEventListener('input', handler);
+    input.addEventListener('change', () => saveGraphicsSettings(true));
+  });
+  qs('#gsPreset1080') && (qs('#gsPreset1080').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1920, height:1080 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
+  qs('#gsPreset720') && (qs('#gsPreset720').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1280, height:720 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
+  qs('#gsReset') && (qs('#gsReset').onclick = async () => { if(!confirm('Reset all graphics settings?')) return; const r = await api('/api/graphics-settings/reset', { method:'POST', body:'{}' }); if(r.ok) graphicsSettings = { ...graphicsDefaults, ...r.settings }; renderGraphicsSettings(); });
+  qs('#graphicsSettingsNav') && (qs('#graphicsSettingsNav').onclick = () => {
+    const card = qs('#graphicsSettingsCard'); if (!card) return;
+    card.scrollIntoView({ behavior:'smooth', block:'start' });
+    card.classList.add('highlightCard'); setTimeout(()=>card.classList.remove('highlightCard'), 1300);
+  });
+}
+socket.on('graphicsSettings', s => { graphicsSettings = { ...graphicsDefaults, ...s }; renderGraphicsSettings(); });
+window.addEventListener('DOMContentLoaded', () => { setupGraphicsSettings(); loadGraphicsSettings(); });
+
+// Scene Manager / Preview-Program workflow
+function sceneGraphicLabel(g){
+  if(!g || g.type === 'blank') return 'Blank';
+  if(g.type === 'overall') return `Overall - Page ${g.page || 1}`;
+  if(g.type === 'entries') return `Entry List - Page ${g.page || 1}`;
+  if(g.type === 'stageTimes') return `Stage Times ${g.stageId || ''} - Page ${g.page || 1}`;
+  if(g.type === 'stage') return `Stage ${g.stageId || ''} Results - Page ${g.page || 1}`;
+  return g.title || g.type;
+}
+let sceneState = null;
+function currentGraphicPayload(){
+  return { type:selectedType, stageId:(selectedType==='stage'||selectedType==='stageTimes')?selectedStage:0, page:selectedPage, pageSize, title:labelFor(selectedType, selectedStage, selectedPage) };
+}
+function renderSceneManager(){
+  const scene = sceneState || state.scene || {};
+  const preview = scene.preview || { type:'blank' };
+  const program = scene.program || state.graphic || { type:'blank' };
+  const p = qs('#previewLabel'); if(p) p.textContent = sceneGraphicLabel(preview);
+  const pr = qs('#programLabel'); if(pr) pr.textContent = sceneGraphicLabel(program);
+  const hp = qs('#homePreviewLabel'); if(hp) hp.textContent = sceneGraphicLabel(preview);
+  const hpr = qs('#homeProgramLabel'); if(hpr) hpr.textContent = sceneGraphicLabel(program);
+  const tr = qs('#sceneTransition'); if(tr && scene.transition) tr.value = scene.transition;
+  const layers = scene.layers || {};
+  const main = layers.main || {};
+  const ml = qs('#mainLayerOpacity'); if(ml) ml.value = main.opacity ?? 100;
+  const mlv = qs('#mainLayerOpacityValue'); if(mlv) mlv.textContent = `${main.opacity ?? 100}%`;
+  const bug = layers.bug || {};
+  const be = qs('#bugEnabled'); if(be) be.checked = !!bug.enabled;
+  const bt = qs('#bugText'); if(bt) bt.value = bug.text || '';
+  const ce = qs('#clockEnabled'); if(ce) ce.checked = !!(layers.clock && layers.clock.enabled);
+}
+async function loadScene(){
+  try { const r = await api('/api/scene'); if(r.ok){ sceneState = r.scene; renderSceneManager(); } } catch {}
+}
+async function previewCurrent(){
+  const r = await api('/api/scene/preview', { method:'POST', body:JSON.stringify(currentGraphicPayload()) });
+  if(r.ok){ sceneState = r.scene; renderSceneManager(); setLastUpdated(); }
+}
+async function takePreviewToProgram(){
+  const r = await api('/api/scene/take-preview', { method:'POST', body:'{}' });
+  if(r.ok){ state = r.state; sceneState = r.state.scene; renderSceneManager(); setLastUpdated(); }
+}
+async function clearProgramScene(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank'})}); setLastUpdated(); }
+async function saveSceneLayers(){
+  const layers = {
+    main: { enabled:true, opacity:Number(qs('#mainLayerOpacity')?.value || 100) },
+    bug: { enabled:!!qs('#bugEnabled')?.checked, opacity:100, text:qs('#bugText')?.value || '' },
+    clock: { enabled:!!qs('#clockEnabled')?.checked, opacity:100 }
+  };
+  const r = await api('/api/scene/layers', { method:'POST', body:JSON.stringify({layers}) });
+  if(r.ok){ sceneState = r.scene; renderSceneManager(); }
+}
+function setupSceneManager(){
+  qs('#sceneManagerNav') && (qs('#sceneManagerNav').onclick = () => scrollToCard('#sceneManagerCard'));
+  qs('#previewCurrent') && (qs('#previewCurrent').onclick = previewCurrent);
+  qs('#takePreview') && (qs('#takePreview').onclick = takePreviewToProgram);
+  qs('#clearProgram') && (qs('#clearProgram').onclick = clearProgramScene);
+  qs('#sceneTransition') && (qs('#sceneTransition').onchange = async e => { const r=await api('/api/scene/transition',{method:'POST',body:JSON.stringify({transition:e.target.value})}); if(r.ok){sceneState=r.scene; renderSceneManager();} });
+  ['#mainLayerOpacity','#bugEnabled','#bugText','#clockEnabled'].forEach(id => {
+    const el=qs(id); if(!el) return;
+    el.addEventListener('input', saveSceneLayers);
+    el.addEventListener('change', saveSceneLayers);
+  });
+  qs('#runMacroClear') && (qs('#runMacroClear').onclick = async () => { await api('/api/macros/run',{method:'POST',body:JSON.stringify({index:0})}); });
+  qs('#runMacroTake') && (qs('#runMacroTake').onclick = async () => { await api('/api/macros/run',{method:'POST',body:JSON.stringify({index:1})}); });
+  loadScene();
+}
+socket.on('state', s=>{ if(s?.scene){ sceneState=s.scene; renderSceneManager(); } });
+window.addEventListener('DOMContentLoaded', setupSceneManager);

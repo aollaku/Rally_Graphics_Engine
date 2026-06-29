@@ -10,14 +10,14 @@
   <aside class="sidebar">
     <div class="brand"><div class="logo">RG</div><div><strong>Rally Graphics</strong><span>Djames Results</span></div></div>
     <nav>
-      <button class="nav active" data-target="dashboard">Dashboard</button>
-      <button class="nav" data-type="overall">Overall Leaderboard</button>
-      <button class="nav" data-target="stage">Stage Results</button>
-      <button class="nav" data-type="stageTimes">Stage Times</button>
-      <button class="nav" data-type="entries">Entry List</button>
-      <button class="nav" id="usersNav" data-target="users">User Management</button>
+      <button class="nav active" data-target="dashboard">Home</button>
+      <button class="nav" data-target="graphics">Graphics</button>
+      <button class="nav" data-target="scenes">Scenes</button>
+      <button class="nav" data-target="outputs">Outputs</button>
+      <button class="nav" data-target="designer">Designer</button>
+      <button class="nav" data-target="data">Data</button>
+      <button class="nav" data-target="settings">Settings</button>
       <a class="nav link" id="tabletLink" href="/tablet">Tablet Controller</a>
-      <a class="nav link" id="outputLinkSide" href="/output" target="_blank">Open Output</a>
     </nav>
     <div class="statusBox"><span class="dot"></span><div><strong>Service Status</strong><span id="serviceStatus">Connected</span></div></div>
     <div class="small muted">Last Updated<br><strong id="lastUpdated">--</strong></div>
@@ -34,6 +34,34 @@
 
     <section class="layout">
       <div class="column">
+
+
+        <section class="card sceneCard" id="sceneManagerCard">
+          <div class="cardTitle">Scene Manager <span class="badge live">Preview / Program</span></div>
+          <p class="muted small">Prepare the next graphic in Preview, then Take it to Program. This is the broadcast workflow layer above the normal buttons.</p>
+          <div class="sceneGrid">
+            <div class="sceneBox"><strong>PREVIEW</strong><span id="previewLabel">Blank</span></div>
+            <div class="sceneBox program"><strong>PROGRAM</strong><span id="programLabel">Blank</span></div>
+          </div>
+          <div class="row actions">
+            <button id="previewCurrent" class="outline">Send Current to Preview</button>
+            <button id="takePreview" class="blue">TAKE Preview → Program</button>
+            <button id="clearProgram" class="red">Clear Program</button>
+          </div>
+          <div class="designerGrid">
+            <label>Transition<select id="sceneTransition"><option value="fade">Fade</option><option value="cut">Cut</option><option value="slide">Slide</option><option value="wipe">Wipe</option></select></label>
+            <label>Main Layer Opacity <span id="mainLayerOpacityValue">100%</span><input id="mainLayerOpacity" type="range" min="0" max="100" value="100"></label>
+            <label><input id="bugEnabled" type="checkbox"> Bug / Sponsor Layer</label>
+            <label>Bug Text<input id="bugText" placeholder="LIVE / SPONSOR / RALLY"></label>
+            <label><input id="clockEnabled" type="checkbox"> Clock Layer</label>
+          </div>
+          <div class="row actions">
+            <button id="runMacroClear" class="outline">Macro: Clear</button>
+            <button id="runMacroTake" class="outline">Macro: Take Preview</button>
+          </div>
+          <p class="muted small">Remote API: POST /api/remote/trigger with action=preview, take, takePreview or clear.</p>
+        </section>
+
         <section class="card eventCard">
           <div class="cardTitle">Event Information <span class="badge live">Live</span></div>
           <h1 id="eventTitle">Loading...</h1>
@@ -41,25 +69,20 @@
           <p id="eventInfo" class="muted"></p>
         </section>
 
-        <section class="card">
-          <div class="cardTitle">Quick Access</div>
-          <div class="bigActions">
-            <button class="tile overall" data-type="overall">🏆<strong>Overall Leaderboard</strong><span>All rankings, 10 per graphic</span></button>
-            <button class="tile stageTile" data-target="stage">⚑<strong>Stage Results</strong><span>All rankings, 10 per graphic</span></button>
-            <button class="tile stageTile" data-type="stageTimes">⏱<strong>Stage Times</strong><span>Compact live stage graphic</span></button>
-            <button class="tile entries" data-type="entries">👥<strong>Entry List</strong><span>All competitors</span></button>
+        <section class="card dashboardCard" id="dashboardCard">
+          <div class="cardTitle">Home Dashboard <span class="badge live">Clean Mode</span></div>
+          <div class="dashboardGrid">
+            <div class="dashTile"><strong>Program</strong><span id="homeProgramLabel">Blank</span></div>
+            <div class="dashTile"><strong>Preview</strong><span id="homePreviewLabel">Blank</span></div>
+            <div class="dashTile"><strong>API</strong><span>Connected</span></div>
+            <div class="dashTile"><strong>Output</strong><span>HTTP</span></div>
           </div>
-          <h3>Stage Selector <small>(for Stage Results)</small></h3>
-          <div id="stageButtons" class="stage-grid compact"></div>
-          <p class="center muted">Not all stages may be available for every event.</p>
-          <h3>Page Selector <small>10 rows per graphic</small></h3>
-          <div id="pageButtons" class="stage-grid page-grid compact"></div>
-          <p class="center muted"><span id="totalRows">-- rows</span></p>
+          <p class="muted small">Quick Access buttons removed. Use the Graphics section for selecting content, Scenes for Preview/Program, Outputs for windows, Designer for graphic style, and Data for import/export.</p>
         </section>
       </div>
 
       <div class="column">
-        <section class="card outputCard">
+        <section class="card outputCard" id="graphicsCard">
           <div class="cardTitle">Graphics Output</div>
           <label>Select Output Type</label>
           <div class="segmented">
@@ -71,14 +94,21 @@
           <label>Stage <small>(for Stage Results / Stage Times)</small></label>
           <select id="stageSelect"></select>
           <label>Page <small>10 rows per graphic</small></label>
-          <div id="pageButtons" class="stage-grid page-grid compact"></div>
-          <div class="row"><span id="pageNo" class="badge">Page 1</span><span id="totalRows" class="muted small">-- rows</span></div>
+          <div id="outputPageButtons" class="stage-grid page-grid compact pageButtons"></div>
+          <div class="row"><span id="pageNo" class="badge">Page 1</span><span id="outputTotalRows" class="muted small totalRows">-- rows</span></div>
           <input id="pageSize" type="hidden" value="10">
           <label>Output URL</label>
           <input id="outputUrl" readonly>
+          <div class="targetPanel">
+            <strong>Trigger Target</strong>
+            <label class="switchLabel smallSwitch">Preview <input id="targetPreview" type="checkbox"><span></span></label>
+            <label class="switchLabel smallSwitch">Live Output <input id="targetOutput" type="checkbox" checked><span></span></label>
+            <small class="muted">Choose Preview, Live Output, or both before selecting a graphic/page.</small>
+          </div>
           <div class="row actions">
-            <button id="openOutput" class="outline">↗ Open in New Tab</button>
-            <button id="copyUrl" class="outline">📋 Copy URL</button>
+            <button id="openOutput" class="outline">↗ Open Output</button>
+            <button id="openPreview" class="outline">👁 Open Preview</button>
+            <button id="copyUrl" class="outline">📋 Copy Output URL</button>
             <button id="clearGraphic" class="red">🗑 Clear Graphic</button>
           </div>
           <div class="tip">Make sure “Transparent Background” is enabled in your graphics software if you overlay this on a stream.</div>
@@ -89,34 +119,77 @@
           <div class="row actions bottomActions">
             <button id="refreshData" class="blue">↻ Refresh Data</button>
             <button id="clearCache" class="green">🧹 Clear Cache</button>
-            <button id="clearGraphic2" class="red">🗑 Clear Graphic</button>
           </div>
+        </section>
+
+        <section class="card adminCard" id="dataCard">
+          <div class="cardTitle">Database / Config Import & Export</div>
+          <div class="statusLine"><span class="dot" id="dbDot"></span><strong>Database:</strong> <span id="dbStatus">Checking...</span></div>
+          <div class="row actions">
+            <button id="exportConfig" class="green">⬇ Export Full Config</button>
+            <select id="configImportMode"><option value="merge" selected>Import: Merge</option><option value="replace">Import: Replace Data</option></select>
+            <button id="importConfig" class="blue">⬆ Import Full Config</button>
+            <input id="configFile" type="file" accept="application/json,.json" hidden>
+          </div>
+          <div class="row actions">
+            <button id="exportJson" class="outline">⬇ Export DB JSON</button>
+            <select id="importMode"><option value="merge" selected>DB Import: Merge</option><option value="replace">DB Import: Replace</option></select>
+            <button id="importJson" class="outline">⬆ Import DB JSON</button>
+            <input id="importFile" type="file" accept="application/json,.json" hidden>
+            <button id="refreshAdmin" class="outline">↻ Refresh Status</button>
+          </div>
+          <p class="muted small">Full Config exports graphics settings, current app settings, rundowns and stored rally data so you can load them back later.</p>
         </section>
       </div>
 
       <div class="column previewColumn">
         <section class="card previewCard">
-          <div class="cardTitle">Output Preview (Live)</div>
-          <iframe id="previewFrame" title="Live graphics preview"></iframe>
-          <button id="openOutput2" class="outline right">↗ Open in New Tab</button>
+          <div class="cardTitle">Controller Monitor</div>
+          <iframe id="previewFrame" title="Controller graphics monitor"></iframe>
+          <p class="muted small">Monitor only. Use the single Open Output / Open Preview buttons in Graphics Output.</p>
         </section>
 
-        <section class="card adminCard">
-          <div class="cardTitle">Database / Import / Export / Backup</div>
-          <div class="statusLine"><span class="dot" id="dbDot"></span><strong>Database:</strong> <span id="dbStatus">Checking...</span></div>
-          <div class="statusLine"><span class="dot" id="backupDot"></span><strong>Backups:</strong> <span id="backupStatus">Checking...</span></div>
-          <div class="row actions">
-            <button id="exportJson" class="outline">⬇ Export DB JSON</button>
-            <select id="importMode"><option value="merge" selected>Import: Merge</option><option value="replace">Import: Replace DB</option></select>
-            <button id="importJson" class="outline">⬆ Import DB JSON</button>
-            <input id="importFile" type="file" accept="application/json" hidden>
+        <section class="card designerCard" id="graphicsSettingsCard">
+          <div class="cardTitle">Graphics Settings <span class="badge live">Live</span></div>
+          <p class="muted small">Resize, move and tune the output graphics live. These settings are saved and applied to programme output and preview.</p>
+          <div class="designerTabs">
+            <button class="designerTab active" data-designer-tab="position" type="button">Resize / Position</button>
+            <button class="designerTab" data-designer-tab="look" type="button">Opacity / Look</button>
+            <button class="designerTab" data-designer-tab="animation" type="button">Animation</button>
+          </div>
+          <div class="designerPanel active" data-designer-panel="position">
+            <div class="designerGrid">
+              <label>Scale <span id="gs_scale_value">100%</span><input id="gs_scale" data-gs="scale" type="range" min="0.1" max="3" step="0.01"></label>
+              <label>X Position <span id="gs_x_value">0px</span><input id="gs_x" data-gs="x" type="range" min="-1000" max="1000" step="1"></label>
+              <label>Y Position <span id="gs_y_value">0px</span><input id="gs_y" data-gs="y" type="range" min="-1000" max="1000" step="1"></label>
+              <label>Output Width <span id="gs_width_value">1920px</span><input id="gs_width" data-gs="width" type="number" min="320" max="7680" step="10"></label>
+              <label>Output Height <span id="gs_height_value">1080px</span><input id="gs_height" data-gs="height" type="number" min="240" max="4320" step="10"></label>
+              <label>Corner Radius <span id="gs_radius_value">0px</span><input id="gs_radius" data-gs="radius" type="range" min="0" max="80" step="1"></label>
+            </div>
+          </div>
+          <div class="designerPanel" data-designer-panel="look">
+            <div class="designerGrid">
+              <label>Master Opacity <span id="gs_opacity_value">100%</span><input id="gs_opacity" data-gs="opacity" type="range" min="0" max="100" step="1"></label>
+              <label>Background Opacity <span id="gs_backgroundOpacity_value">100%</span><input id="gs_backgroundOpacity" data-gs="backgroundOpacity" type="range" min="0" max="100" step="1"></label>
+              <label>Border Opacity <span id="gs_borderOpacity_value">100%</span><input id="gs_borderOpacity" data-gs="borderOpacity" type="range" min="0" max="100" step="1"></label>
+              <label>Shadow Opacity <span id="gs_shadowOpacity_value">0%</span><input id="gs_shadowOpacity" data-gs="shadowOpacity" type="range" min="0" max="100" step="1"></label>
+              <label>Blur <span id="gs_blur_value">0px</span><input id="gs_blur" data-gs="blur" type="range" min="0" max="30" step="1"></label>
+              <label>Brightness <span id="gs_brightness_value">100%</span><input id="gs_brightness" data-gs="brightness" type="range" min="0" max="200" step="1"></label>
+              <label>Contrast <span id="gs_contrast_value">100%</span><input id="gs_contrast" data-gs="contrast" type="range" min="0" max="200" step="1"></label>
+            </div>
+          </div>
+          <div class="designerPanel" data-designer-panel="animation">
+            <div class="designerGrid">
+              <label>Animation Speed <span id="gs_animationSpeed_value">1.0x</span><input id="gs_animationSpeed" data-gs="animationSpeed" type="range" min="0.1" max="5" step="0.1"></label>
+              <label>Animation Duration <span id="gs_animationDuration_value">280ms</span><input id="gs_animationDuration" data-gs="animationDuration" type="range" min="0" max="5000" step="10"></label>
+              <label>Easing <span id="gs_easing_value">ease-out</span><select id="gs_easing" data-gs="easing"><option value="linear">Linear</option><option value="ease">Ease</option><option value="ease-in">Ease In</option><option value="ease-out">Ease Out</option><option value="ease-in-out">Ease In Out</option><option value="cubic-bezier(.34,1.56,.64,1)">Bounce</option></select></label>
+            </div>
           </div>
           <div class="row actions">
-            <button id="refreshAdmin" class="blue">↻ Refresh Status</button>
-            <select id="backupSelect"></select>
-            <button id="downloadBackup" class="outline">Download Backup</button>
+            <button id="gsPreset1080" class="outline" type="button">1080p Reset Size</button>
+            <button id="gsPreset720" class="outline" type="button">720p Size</button>
+            <button id="gsReset" class="red" type="button">Reset All</button>
           </div>
-          <p class="muted small">Data is stored in PostgreSQL. Backups are created automatically by the backup container.</p>
         </section>
 
 
@@ -152,7 +225,7 @@
           <ol>
             <li>Select the data you want to display.</li>
             <li>Click “Copy URL” and add it to OBS, vMix, CasparCG or a browser source.</li>
-            <li>Click “Open in New Tab” to preview the output.</li>
+            <li>Use the single Open Output / Open Preview buttons in Graphics Output.</li>
             <li>Use “Clear Graphic” to hide the graphic output.</li>
           </ol>
         </section>
