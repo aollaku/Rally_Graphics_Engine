@@ -196,16 +196,95 @@ async function audit(action, details={}){
 }
 
 async function exportAll(){
-  if (!dbEnabled()) return { exportedAt: new Date().toISOString(), database: false, events: [], result_snapshots: [], graphics_history: [], audit_log: [], rundowns: [], users: listUsers() };
+  if (!dbEnabled()) {
+    return {
+      exportedAt: new Date().toISOString(),
+      database: false,
+      events: [], result_snapshots: [], graphics_history: [], audit_log: [], rundowns: [],
+      users: memoryUsers.map(u => ({
+        id: u.id, username: u.username, password_hash: u.password_hash, role: u.role,
+        display_name: u.display_name, enabled: u.enabled !== false, created_at: u.created_at, updated_at: u.updated_at
+      }))
+    };
+  }
   const [events, snaps, history, auditRows, rundownRows, userRows] = await Promise.all([
     query('SELECT * FROM events ORDER BY updated_at DESC'),
     query('SELECT * FROM result_snapshots ORDER BY event_id,result_type,stage_id'),
     query('SELECT * FROM graphics_history ORDER BY id DESC LIMIT 500'),
     query('SELECT * FROM audit_log ORDER BY id DESC LIMIT 500'),
     query('SELECT * FROM rundowns ORDER BY updated_at DESC'),
-    query('SELECT id,username,role,display_name,enabled,created_at,updated_at FROM users ORDER BY id ASC')
+    query('SELECT id,username,password_hash,role,display_name,enabled,created_at,updated_at FROM users ORDER BY id ASC')
   ]);
-  return { exportedAt: new Date().toISOString(), database: true, events: events.rows, result_snapshots: snaps.rows, graphics_history: history.rows, audit_log: auditRows.rows, rundowns: rundownRows.rows, users: userRows.rows.map(cleanUser) };
+  return {
+    exportedAt: new Date().toISOString(),
+    database: true,
+    events: events.rows,
+    result_snapshots: snaps.rows,
+    graphics_history: history.rows,
+    audit_log: auditRows.rows,
+    rundowns: rundownRows.rows,
+    // IMPORTANT: users include password_hash so a full config export can restore deleted users
+    // without needing to know or reset their passwords. Keep config files private.
+    users: userRows.rows
+  };
+}
+
+async function importUsersFromExport(users=[], mode='merge'){
+  const rows = Array.isArray(users) ? users : [];
+  if (!rows.length) return 0;
+  if (!dbEnabled()) {
+    if (mode === 'replace') memoryUsers = [];
+    let count = 0;
+    for (const raw of rows) {
+      const username = String(raw.username || '').trim().toLowerCase();
+      if (!username) continue;
+      const existing = memoryUsers.find(u => u.username === username);
+      const user = {
+        id: existing?.id || raw.id || (memoryUsers.reduce((m,u)=>Math.max(m, Number(u.id)||0), 0) + 1),
+        username,
+        password_hash: raw.password_hash || raw.passwordHash || (raw.password ? hashPassword(raw.password) : hashPassword(crypto.randomBytes(16).toString('hex'))),
+        role: ['admin','operator','tablet','viewer'].includes(raw.role) ? raw.role : 'operator',
+        display_name: raw.display_name || raw.displayName || username,
+        enabled: raw.enabled !== false,
+        created_at: raw.created_at || raw.createdAt || new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+      if (existing) Object.assign(existing, user); else memoryUsers.push(user);
+      count++;
+    }
+    if (!memoryUsers.some(u => u.username === DEFAULT_ADMIN_USER)) {
+      memoryUsers.push({ id: memoryUsers.length + 1, username: DEFAULT_ADMIN_USER, password_hash: hashPassword(DEFAULT_ADMIN_PASSWORD), role: 'admin', display_name: 'Super Admin', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() });
+    }
+    return count;
+  }
+
+  if (mode === 'replace') {
+    await query('TRUNCATE TABLE users RESTART IDENTITY CASCADE');
+  }
+  let count = 0;
+  for (const raw of rows) {
+    const username = String(raw.username || '').trim().toLowerCase();
+    if (!username) continue;
+    const passwordHash = raw.password_hash || raw.passwordHash || (raw.password ? hashPassword(raw.password) : null);
+    if (!passwordHash) continue;
+    const role = ['admin','operator','tablet','viewer'].includes(raw.role) ? raw.role : 'operator';
+    await query(`
+      INSERT INTO users(username,password_hash,role,display_name,enabled,created_at,updated_at)
+      VALUES($1,$2,$3,$4,$5,COALESCE($6::timestamptz, now()),now())
+      ON CONFLICT(username) DO UPDATE SET
+        password_hash=EXCLUDED.password_hash,
+        role=EXCLUDED.role,
+        display_name=EXCLUDED.display_name,
+        enabled=EXCLUDED.enabled,
+        updated_at=now()
+    `, [username, passwordHash, role, raw.display_name || raw.displayName || username, raw.enabled !== false, raw.created_at || raw.createdAt || null]);
+    count++;
+  }
+  const admin = await query('SELECT id FROM users WHERE username=$1 LIMIT 1', [DEFAULT_ADMIN_USER]);
+  if (!admin.rowCount) {
+    await query(`INSERT INTO users(username,password_hash,role,display_name,enabled) VALUES($1,$2,'admin','Super Admin',true)`, [DEFAULT_ADMIN_USER, hashPassword(DEFAULT_ADMIN_PASSWORD)]);
+  }
+  return count;
 }
 
 async function importAll(payload, mode='merge'){
@@ -213,12 +292,13 @@ async function importAll(payload, mode='merge'){
   if (mode === 'replace') {
     await query('TRUNCATE TABLE rundowns, result_snapshots, events, graphics_history, audit_log RESTART IDENTITY CASCADE');
   }
-  let events=0, snapshots=0, rundowns=0;
+  let events=0, snapshots=0, rundowns=0, users=0;
   for (const e of payload.events || []) { await upsertEvent(e.event_id, e.data || e); events++; }
   for (const s of payload.result_snapshots || []) { await upsertSnapshot(s.event_id, s.result_type, s.stage_id, s.data || {}); snapshots++; }
   for (const r of payload.rundowns || []) { await saveRundown(r.event_id, r.items || []); rundowns++; }
-  await audit('import_db_json', { mode, events, snapshots, rundowns });
-  return { imported: true, mode, events, snapshots, rundowns };
+  if (Array.isArray(payload.users)) users = await importUsersFromExport(payload.users, mode);
+  await audit('import_db_json', { mode, events, snapshots, rundowns, users });
+  return { imported: true, mode, events, snapshots, rundowns, users };
 }
 
 async function getRundown(eventId){

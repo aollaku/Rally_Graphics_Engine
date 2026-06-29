@@ -404,13 +404,14 @@ app.get('/api/config/export', requireLogin, async (req, res) => {
   const database = await db.exportAll();
   const config = {
     kind: 'rally-graphics-config',
-    version: 1,
+    version: 2,
+    includesUsers: true,
     exportedAt: new Date().toISOString(),
     appState: sharedState,
     graphicsSettings: sharedState.graphicsSettings || DEFAULT_GRAPHICS_SETTINGS,
     database
   };
-  await db.audit('export_config', { user: req.session.user.username, eventId: sharedState.eventId });
+  await db.audit('export_config', { user: req.session.user.username, eventId: sharedState.eventId, includesUsers: true });
   res.setHeader('Content-Type', 'application/json');
   res.setHeader('Content-Disposition', `attachment; filename="rally_graphics_config_${new Date().toISOString().slice(0,10)}.json"`);
   res.send(JSON.stringify(config, null, 2));
@@ -436,7 +437,7 @@ app.post('/api/config/import', requireLogin, async (req, res) => {
     let databaseResult = null;
     if (payload.database) databaseResult = await db.importAll(payload.database, mode);
 
-    await db.audit('import_config', { user: req.session.user.username, mode, importedDatabase: !!payload.database });
+    await db.audit('import_config', { user: req.session.user.username, mode, importedDatabase: !!payload.database, usersRestored: databaseResult?.users || 0 });
     io.emit('graphicsSettings', state.graphicsSettings);
     io.emit('state', state);
     res.json({ ok: true, result: { mode, stateImported: true, database: databaseResult } });
