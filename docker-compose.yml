@@ -38,7 +38,6 @@ services:
     volumes:
       - backups_data:/backups
       - logos_data:/app/public/uploads/logos
-      - logos_data:/app/public/uploads/logos
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
@@ -67,6 +66,7 @@ services:
       BACKUP_DIR: "/backups"
     volumes:
       - backups_data:/backups
+      - logos_data:/app/public/uploads/logos
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
