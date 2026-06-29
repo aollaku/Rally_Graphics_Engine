@@ -10,15 +10,13 @@
   <aside class="sidebar">
     <div class="brand"><div class="logo">RG</div><div><strong>Rally Graphics</strong><span>Djames Results</span></div></div>
     <nav>
-      <button class="nav active" data-target="dashboard">Home</button>
-      <button class="nav" data-target="graphics">Graphics</button>
+      <button class="nav active" data-target="graphics">Graphics</button>
       <button class="nav" data-target="scenes">Scenes</button>
       <button class="nav" data-target="outputs">Outputs</button>
       <button class="nav" data-target="designer">Designer</button>
       <button class="nav" data-target="data">Data</button>
       <button class="nav" data-target="settings">Settings</button>
       <button class="nav" data-target="health">Health</button>
-      <button class="nav" data-target="logs">Errors</button>
       <a class="nav link" id="tabletLink" href="/tablet">Tablet Controller</a>
     </nav>
     <div class="statusBox"><span class="dot"></span><div><strong>Service Status</strong><span id="serviceStatus">Connected</span></div></div>
@@ -69,16 +67,7 @@
           <p id="eventInfo" class="muted"></p>
         </section>
 
-        <section class="card dashboardCard" id="dashboardCard">
-          <div class="cardTitle">Home Dashboard <span class="badge live">Clean Mode</span></div>
-          <div class="dashboardGrid">
-            <div class="dashTile"><strong>Program</strong><span id="homeProgramLabel">Blank</span></div>
-            <div class="dashTile"><strong>Preview</strong><span id="homePreviewLabel">Blank</span></div>
-            <div class="dashTile ledTile"><span class="led green" id="dashApiLed"></span><strong>API</strong><span id="dashApiText">Checking...</span></div>
-            <div class="dashTile ledTile"><span class="led green" id="dashDbLed"></span><strong>Database</strong><span id="dashDbText">Checking...</span></div>
-          </div>
-          <p class="muted small">Quick Access buttons removed. Use the Graphics section for selecting content, Scenes for Preview/Program, Outputs for windows, Designer for graphic style, and Data for import/export.</p>
-        </section>
+
       </div>
 
       <div class="column">
@@ -220,12 +209,7 @@
           <div class="row actions"><button id="refreshHealth" class="outline">↻ Refresh Health</button></div>
         </section>
 
-        <section class="card errorCard" id="errorCard">
-          <div class="cardTitle">Error Viewer <span class="badge">Simple Messages</span></div>
-          <p class="muted small">Readable system problems only. No JSON logs here.</p>
-          <div id="errorList" class="errorList"><div class="errorEmpty">No errors reported.</div></div>
-          <div class="row actions"><button id="refreshErrors" class="outline">↻ Refresh Errors</button><button id="clearErrors" class="red">Clear Error List</button></div>
-        </section>
+
       </div>
 
       <div class="column previewColumn">
@@ -365,15 +349,7 @@
           <div id="shortcutList" class="shortcutList"></div>
           <div class="row actions"><button id="saveShortcuts" class="green">Save Shortcuts</button><button id="resetShortcuts" class="outline">Reset Defaults</button></div>
         </section>
-        <section class="card howto">
-          <div class="cardTitle">How to Use</div>
-          <ol>
-            <li>Select the data you want to display.</li>
-            <li>Click “Copy URL” and add it to OBS, vMix, CasparCG or a browser source.</li>
-            <li>Use the single Open Output / Open Preview buttons in Graphics Output.</li>
-            <li>Use “Clear Graphic” to hide the graphic output.</li>
-          </ol>
-        </section>
+
       </div>
     </section>
   </main>
