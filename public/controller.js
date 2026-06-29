@@ -369,15 +369,32 @@ function setupGraphicsSettings(){
     qsa('.designerTab').forEach(b => b.classList.toggle('active', b === btn));
     qsa('.designerPanel').forEach(p => p.classList.toggle('active', p.dataset.designerPanel === btn.dataset.designerTab));
   });
+  function applyGraphicsInput(input, immediate=false){
+    const key = input.dataset.gs;
+    if (!key) return;
+    graphicsSettings[key] = input.type === 'number' || input.type === 'range' ? Number(input.value) : input.value;
+    const out = qs(`#gs_${key}_value`); if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
+    saveGraphicsSettings(immediate);
+  }
   qsa('[data-gs]').forEach(input => {
-    const handler = () => {
-      const key = input.dataset.gs;
-      graphicsSettings[key] = input.type === 'number' || input.type === 'range' ? Number(input.value) : input.value;
-      const out = qs(`#gs_${key}_value`); if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
-      saveGraphicsSettings(false);
-    };
-    input.addEventListener('input', handler);
+    input.addEventListener('input', () => applyGraphicsInput(input, false));
     input.addEventListener('change', () => saveGraphicsSettings(true));
+  });
+  qsa('[data-step-target]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const input = qs(`#${btn.dataset.stepTarget}`);
+      if (!input) return;
+      const dir = Number(btn.dataset.stepDir || 1);
+      const step = Number(input.step || 1) || 1;
+      const min = input.min === '' ? -Infinity : Number(input.min);
+      const max = input.max === '' ? Infinity : Number(input.max);
+      const current = Number(input.value || 0);
+      const decimals = (String(input.step || '').split('.')[1] || '').length;
+      let next = current + (dir * step);
+      next = Math.max(min, Math.min(max, next));
+      input.value = decimals ? next.toFixed(decimals) : String(Math.round(next));
+      applyGraphicsInput(input, true);
+    });
   });
   qs('#gsPreset1080') && (qs('#gsPreset1080').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1920, height:1080 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
   qs('#gsPreset720') && (qs('#gsPreset720').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1280, height:720 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
