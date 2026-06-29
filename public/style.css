@@ -47,3 +47,49 @@
 
 /* Workflow optimisation pack */
 .healthGrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}.healthItem{display:flex;gap:12px;align-items:center;border:1px solid var(--line);border-radius:14px;background:#f8fafc;padding:13px}.healthItem div{display:flex;flex-direction:column;gap:4px}.healthItem strong{font-size:13px;color:#0f172a}.healthItem span:last-child{font-size:12px;color:#475569}.led{width:13px;height:13px;min-width:13px;border-radius:50%;display:inline-block;background:#ef4444;box-shadow:0 0 10px rgba(239,68,68,.7)}.led.green{background:#22c55e;box-shadow:0 0 10px rgba(34,197,94,.7)}.led.orange{background:#f59e0b;box-shadow:0 0 10px rgba(245,158,11,.7)}.led.red{background:#ef4444}.ledTile{position:relative}.ledTile .led{position:absolute;right:14px;top:14px}.errorList{display:flex;flex-direction:column;gap:10px;max-height:300px;overflow:auto}.errorItem{display:flex;gap:12px;border:1px solid var(--line);border-radius:14px;padding:12px;background:#fff}.errorItem p{margin:3px 0;color:#334155}.errorItem small{color:#64748b}.errorEmpty{padding:14px;border:1px dashed var(--line);border-radius:12px;color:#64748b;background:#f8fafc}.designerToolbar{display:grid;grid-template-columns:1fr auto auto;gap:10px;align-items:end;margin:8px 0 12px}.designerToolbar label{font-weight:900;font-size:13px}.designerToolbar select{width:100%;margin-top:6px;border:1px solid var(--line);border-radius:9px;padding:10px;background:#fff}.designerCard.locked{opacity:.78}.designerCard.locked:before{content:'OPERATOR LOCK ENABLED';display:block;background:#fef3c7;color:#92400e;font-weight:900;padding:8px 10px;border-radius:10px;margin-bottom:10px}.checkRow{display:flex!important;align-items:center;gap:10px;border:1px solid var(--line);border-radius:12px;padding:12px;background:#f8fafc}.checkRow input{width:auto!important;margin:0!important}.checkRow small{display:block;color:#64748b;font-weight:600}.shortcutList{display:flex;flex-direction:column;gap:10px}.shortcutRow{display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:center;border:1px solid var(--line);background:#f8fafc;border-radius:12px;padding:10px}.shortcutKey{background:#0f172a;color:#fff;border-color:#0f172a}.shortcutKey.recording{background:#f59e0b;border-color:#f59e0b}.designerTabs{grid-template-columns:repeat(5,1fr)}@media(max-width:720px){.healthGrid,.designerToolbar,.shortcutRow{grid-template-columns:1fr}.designerTabs{grid-template-columns:1fr}}
+
+/* Logo library for Bug/Sponsor layer */
+.logoLibraryBox{
+  border:1px solid rgba(255,255,255,.12);
+  border-radius:14px;
+  padding:12px;
+  background:rgba(255,255,255,.04);
+}
+.logoPreviewBox{
+  min-height:72px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px dashed rgba(255,255,255,.18);
+  border-radius:12px;
+  margin-top:8px;
+  color:rgba(255,255,255,.55);
+  overflow:hidden;
+  background:linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.08) 75%),linear-gradient(45deg, rgba(255,255,255,.08) 25%, transparent 25%, transparent 75%, rgba(255,255,255,.08) 75%);
+  background-size:20px 20px;
+  background-position:0 0,10px 10px;
+}
+.logoPreviewBox img{max-width:220px;max-height:90px;object-fit:contain;display:block;}
+.compactActions{gap:8px;margin:8px 0;}
+
+.cutTypeGrid{display:flex;flex-direction:column;gap:8px;margin:8px 0 12px}
+.cutTypeRow{display:grid;grid-template-columns:1.4fr repeat(3,auto);gap:8px;align-items:center;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:8px}
+.cutTypeRow strong{font-size:13px}
+.cutTypeRow button{padding:7px 10px;font-size:12px}
+
+/* Broadcast-style controller layout */
+.broadcastControlCard .targetPanel{margin-bottom:14px}
+.broadcastGroup{border:1px solid var(--line);border-radius:14px;background:#f8fafc;margin:14px 0;padding:12px;display:flex;flex-direction:column;gap:10px}
+.broadcastGroupTitle{text-transform:uppercase;font-weight:900;font-size:13px;color:#0f172a;letter-spacing:.08em;border-bottom:1px solid var(--line);padding:4px 2px 10px;margin-bottom:2px}
+.broadcastRow{display:grid;grid-template-columns:1.35fr 1.2fr .7fr .9fr .9fr .8fr;gap:8px;align-items:center;background:#fff;border:1px solid #dbe3ef;border-radius:12px;padding:10px}
+.broadcastName{font-weight:900;color:#0f172a}
+.broadcastStatus{display:grid;grid-template-columns:auto auto auto auto;gap:6px;align-items:center;color:#475569;font-weight:800;font-size:12px}
+.broadcastTakeBtn{font-weight:900}
+.broadcastRow button{padding:8px 10px;font-size:12px;white-space:nowrap}
+.activeGraphicsPanel{border:1px solid var(--line);border-radius:14px;background:#0f172a;color:#fff;padding:12px;margin:14px 0}
+.activeGraphicsPanel strong{display:block;text-transform:uppercase;font-size:12px;letter-spacing:.08em;margin-bottom:8px;color:#dbeafe}
+.activeGraphicsList{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.activePill{display:inline-flex;align-items:center;gap:5px;border-radius:999px;padding:6px 9px;font-weight:800;font-size:12px}
+.livePill{background:rgba(34,197,94,.18);color:#bbf7d0;border:1px solid rgba(34,197,94,.35)}
+.previewPill{background:rgba(245,158,11,.18);color:#fde68a;border:1px solid rgba(245,158,11,.35)}
+@media(max-width:1100px){.broadcastRow{grid-template-columns:1fr 1fr}.broadcastRow button{width:100%}.broadcastStatus{justify-content:start}}

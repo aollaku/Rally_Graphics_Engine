@@ -1,0 +1,1 @@
+Logo transparency fix: output no longer draws the bug box behind logo-only layers. PNG upload now preserves real alpha and can clean common baked white/grey checkerboard backgrounds from logo files that were not actually transparent. Re-upload affected logos after updating.

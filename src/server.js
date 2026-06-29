@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
@@ -67,8 +68,13 @@ const DEFAULT_SCENE_STATE = {
   layers: {
     background: { enabled: true, opacity: 100 },
     main: { enabled: true, opacity: 100 },
-    bug: { enabled: false, opacity: 100, text: '' },
-    clock: { enabled: false, opacity: 100 }
+    // These are style/content settings only. Visibility is controlled ONLY by the controller layer buttons.
+    bug: { enabled: false, logoEnabled: false, opacity: 100, text: '', x: 0, y: 0, fontSize: 28, backgroundOpacity: 72, logoUrl: '', logoWidth: 120, logoOpacity: 100 },
+    clock: { enabled: false, opacity: 100, x: 0, y: 0, fontSize: 28, backgroundOpacity: 72 }
+  },
+  layerVisibility: {
+    preview: { bug: false, logo: false, clock: false },
+    program: { bug: false, logo: false, clock: false }
   },
   macros: [
     { name: 'Clear Program', actions: [{ type: 'clear' }] },
@@ -88,13 +94,22 @@ function normaliseGraphic(g={}){
 }
 function normaliseScene(input={}){
   const s = { ...DEFAULT_SCENE_STATE, ...(input || {}) };
+  const incomingLayers = s.layers || {};
+  const mergedLayers = {
+    background: { ...DEFAULT_SCENE_STATE.layers.background, ...(incomingLayers.background || {}) },
+    main: { ...DEFAULT_SCENE_STATE.layers.main, ...(incomingLayers.main || {}) },
+    // Bug text and logo are persistent independent layers. They must not be reset by TAKE/CLEAR.
+    bug: { ...DEFAULT_SCENE_STATE.layers.bug, ...(incomingLayers.bug || {}) },
+    clock: { ...DEFAULT_SCENE_STATE.layers.clock, ...(incomingLayers.clock || {}) }
+  };
   return {
     preview: normaliseGraphic(s.preview || {}),
     program: s.program ? normaliseGraphic(s.program) : null,
     transition: ['cut','fade','slide','wipe'].includes(s.transition) ? s.transition : 'fade',
-    layers: {
-      ...DEFAULT_SCENE_STATE.layers,
-      ...(s.layers || {})
+    layers: mergedLayers,
+    layerVisibility: {
+      preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((s.layerVisibility || {}).preview || {}) },
+      program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((s.layerVisibility || {}).program || {}) }
     },
     macros: Array.isArray(s.macros) ? s.macros.slice(0, 50) : DEFAULT_SCENE_STATE.macros,
     updatedAt: new Date().toISOString()
@@ -244,6 +259,63 @@ app.post('/api/graphics-settings/reset', requireControl, async (req, res) => {
   res.json({ ok:true, settings: state.graphicsSettings });
 });
 
+
+
+function listUploadedLogos(){
+  const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'logos');
+  fs.mkdirSync(uploadDir, { recursive:true });
+  return fs.readdirSync(uploadDir)
+    .filter(f => f.toLowerCase().endsWith('.png'))
+    .map(f => {
+      const st = fs.statSync(path.join(uploadDir, f));
+      return { fileName: f, url: `/uploads/logos/${f}`, size: st.size, uploadedAt: st.mtime.toISOString() };
+    })
+    .sort((a,b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+}
+app.get('/api/assets/logos', requireControl, async (req, res) => {
+  try { res.json({ ok:true, logos:listUploadedLogos() }); }
+  catch (err) { recordError('asset_list', err.message, 'orange'); res.status(500).json({ ok:false, error:humanError(err.message) }); }
+});
+
+app.post('/api/assets/logo/select', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    const url = String(req.body?.url || '');
+    const logos = listUploadedLogos();
+    if (url && !logos.some(l => l.url === url)) return res.status(400).json({ ok:false, error:'Selected logo was not found in the logo library.' });
+    state.scene = normaliseScene(state.scene);
+    state.scene.layers = { ...DEFAULT_SCENE_STATE.layers, ...(state.scene.layers || {}) };
+    state.scene.layers.bug = { ...DEFAULT_SCENE_STATE.layers.bug, ...(state.scene.layers.bug || {}), logoUrl:url };
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('logo_select', { user: req.session?.user?.username || 'token', url });
+    io.emit('state', state);
+    res.json({ ok:true, scene:state.scene, logos });
+  } catch (err) { recordError('asset_select', err.message, 'orange'); res.status(500).json({ ok:false, error:humanError(err.message) }); }
+});
+
+app.post('/api/assets/logo', requireControl, async (req, res) => {
+  try {
+    const dataUrl = String(req.body?.dataUrl || '');
+    const originalName = safeFileName(req.body?.name || 'logo.png') || 'logo.png';
+    const match = dataUrl.match(/^data:image\/png;base64,([A-Za-z0-9+/=]+)$/);
+    if (!match) return res.status(400).json({ ok:false, error:'Please upload a PNG logo file with transparency support.' });
+    const buffer = Buffer.from(match[1], 'base64');
+    if (!buffer.length || buffer.length > 8 * 1024 * 1024) return res.status(400).json({ ok:false, error:'PNG logo must be smaller than 8 MB.' });
+    if (buffer.slice(0,8).toString('hex') !== '89504e470d0a1a0a') return res.status(400).json({ ok:false, error:'Only real PNG files are allowed.' });
+    const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'logos');
+    fs.mkdirSync(uploadDir, { recursive:true });
+    const fileName = `${Date.now()}_${crypto.randomBytes(4).toString('hex')}_${originalName.replace(/\.png$/i,'')}.png`;
+    fs.writeFileSync(path.join(uploadDir, fileName), buffer);
+    const url = `/uploads/logos/${fileName}`;
+    await db.audit('logo_upload', { user: req.session?.user?.username || 'token', fileName });
+    res.json({ ok:true, url, fileName, logos:listUploadedLogos() });
+  } catch (err) {
+    recordError('asset_upload', err.message, 'orange');
+    res.status(500).json({ ok:false, error:humanError(err.message) });
+  }
+});
+
 app.post('/api/event', requireControl, async (req, res) => {
   const eventId = String(req.body.eventId || '').replace(/\D/g, '');
   if (!eventId) return res.status(400).json({ ok: false, error: 'Valid EventID required' });
@@ -297,6 +369,14 @@ app.post('/api/take', requireControl, async (req, res) => {
     state.scene.program = { ...graphic };
     await db.logGraphic(state.eventId, state.graphic);
   }
+  if (graphic.type === 'blank') {
+    state.scene.layerVisibility = {
+      preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((state.scene.layerVisibility || {}).preview || {}) },
+      program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((state.scene.layerVisibility || {}).program || {}) }
+    };
+    if (target === 'preview' || target === 'both') state.scene.layerVisibility.preview = { bug:false, logo:false, clock:false };
+    if (target === 'program' || target === 'both') state.scene.layerVisibility.program = { bug:false, logo:false, clock:false };
+  }
   state.scene.updatedAt = new Date().toISOString();
   await saveSharedState();
   await db.audit('take_graphic', { eventId: state.eventId, target, graphic, user: req.session?.user?.username || 'token' });
@@ -332,14 +412,146 @@ app.post('/api/scene/take-preview', requireControl, async (req, res) => {
   res.json({ ok:true, state });
 });
 
+
+
+// Dedicated clear for the main graphic only. This does NOT touch Bug, Logo or Clock layers.
+// It fixes preview clear by clearing the exact Preview/Program scene slot instead of using
+// the general take route, which can be affected by layer logic and old render keys.
+app.post('/api/scene/main-clear', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    state.scene = normaliseScene(state.scene);
+    const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'program';
+    const blank = { type:'blank', stageId:0, page:1, pageSize:10, updatedAt:new Date().toISOString() };
+    if (target === 'preview' || target === 'both') state.scene.preview = { ...blank };
+    if (target === 'program' || target === 'both') {
+      state.scene.program = { ...blank };
+      state.graphic = { ...blank };
+      await db.logGraphic(state.eventId, state.graphic);
+    }
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('scene_main_clear', { user: req.session?.user?.username || 'token', target });
+    io.emit('clearRender', { kind:'main', target, seq:Date.now() });
+    io.emit('state', state);
+    res.json({ ok:true, state, scene: state.scene });
+  } catch (err) {
+    recordError('scene_main_clear', err.message, 'orange');
+    res.status(500).json({ ok:false, error: humanError(err.message) });
+  }
+});
+
+
+// Clear only a specific main graphic type from Preview and/or Program.
+// Overlay layers (Bug, Logo, Clock) are never touched here.
+app.post('/api/scene/main-clear-type', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    state.scene = normaliseScene(state.scene);
+    const type = String(req.body.type || '');
+    const allowedTypes = ['overall','stage','stageTimes','entries'];
+    if (!allowedTypes.includes(type)) return res.status(400).json({ ok:false, error:'Unknown graphic type' });
+    const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'program';
+    const blank = { type:'blank', stageId:0, page:1, pageSize:10, updatedAt:new Date().toISOString() };
+    const cleared = { preview:false, program:false };
+
+    if ((target === 'preview' || target === 'both') && state.scene.preview?.type === type) {
+      state.scene.preview = { ...blank };
+      cleared.preview = true;
+    }
+    if ((target === 'program' || target === 'both') && (state.scene.program?.type === type || state.graphic?.type === type)) {
+      state.scene.program = { ...blank };
+      state.graphic = { ...blank };
+      cleared.program = true;
+      await db.logGraphic(state.eventId, state.graphic);
+    }
+
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('scene_main_clear_type', { user: req.session?.user?.username || 'token', target, type, cleared });
+    io.emit('clearRender', { kind:'mainType', target, type, seq:Date.now() });
+    io.emit('state', state);
+    res.json({ ok:true, state, scene: state.scene, cleared });
+  } catch (err) {
+    recordError('scene_main_clear_type', err.message, 'orange');
+    res.status(500).json({ ok:false, error: humanError(err.message) });
+  }
+});
+
 app.post('/api/scene/layers', requireControl, async (req, res) => {
   await loadSharedState();
-  state.scene.layers = { ...DEFAULT_SCENE_STATE.layers, ...(state.scene.layers || {}), ...(req.body.layers || req.body || {}) };
+  state.scene = normaliseScene(state.scene);
+  const incoming = req.body.layers || req.body || {};
+  state.scene.layers = {
+    background: { ...DEFAULT_SCENE_STATE.layers.background, ...(state.scene.layers.background || {}), ...(incoming.background || {}) },
+    main: { ...DEFAULT_SCENE_STATE.layers.main, ...(state.scene.layers.main || {}), ...(incoming.main || {}) },
+    bug: { ...DEFAULT_SCENE_STATE.layers.bug, ...(state.scene.layers.bug || {}), ...(incoming.bug || {}) },
+    clock: { ...DEFAULT_SCENE_STATE.layers.clock, ...(state.scene.layers.clock || {}), ...(incoming.clock || {}) }
+  };
   state.scene.updatedAt = new Date().toISOString();
   await saveSharedState();
   await db.audit('scene_layers_update', { user: req.session?.user?.username || 'token', layers: state.scene.layers });
   io.emit('state', state);
   res.json({ ok:true, scene: state.scene });
+});
+
+
+app.post('/api/scene/layer-trigger', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    state.scene = normaliseScene(state.scene);
+    const layer = String(req.body.layer || '').trim();
+    const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'preview';
+    if (!['bug','logo','clock'].includes(layer)) return res.status(400).json({ ok:false, error:'Unknown layer button.' });
+    state.scene.layerVisibility = {
+      preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((state.scene.layerVisibility || {}).preview || {}) },
+      program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((state.scene.layerVisibility || {}).program || {}) }
+    };
+    if (target === 'preview' || target === 'both') state.scene.layerVisibility.preview[layer] = true;
+    if (target === 'program' || target === 'both') state.scene.layerVisibility.program[layer] = true;
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('scene_layer_trigger', { user: req.session?.user?.username || 'token', layer, target });
+    io.emit('state', state);
+    res.json({ ok:true, scene: state.scene });
+  } catch (err) {
+    recordError('scene_layer_trigger', err.message, 'orange');
+    res.status(500).json({ ok:false, error: humanError(err.message) });
+  }
+});
+
+app.post('/api/scene/layer-clear', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    state.scene = normaliseScene(state.scene);
+    const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'program';
+    const layer = String(req.body.layer || '').trim();
+    const validLayers = ['bug','logo','clock'];
+    state.scene.layerVisibility = {
+      preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((state.scene.layerVisibility || {}).preview || {}) },
+      program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((state.scene.layerVisibility || {}).program || {}) }
+    };
+
+    // If a layer is supplied, cut only that layer. If no layer is supplied, keep the old behaviour
+    // and clear all overlay layers for the requested target. This keeps Logo, Bug and Clock independent.
+    if (layer && !validLayers.includes(layer)) return res.status(400).json({ ok:false, error:'Unknown layer.' });
+    const clearTarget = (t) => {
+      if (layer) state.scene.layerVisibility[t][layer] = false;
+      else state.scene.layerVisibility[t] = { bug:false, logo:false, clock:false };
+    };
+    if (target === 'preview' || target === 'both') clearTarget('preview');
+    if (target === 'program' || target === 'both') clearTarget('program');
+
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('scene_layer_clear', { user: req.session?.user?.username || 'token', target, layer: layer || 'all' });
+    io.emit('clearRender', { kind:'layer', target, layer: layer || 'all', seq:Date.now() });
+    io.emit('state', state);
+    res.json({ ok:true, scene: state.scene });
+  } catch (err) {
+    recordError('scene_layer_clear', err.message, 'orange');
+    res.status(500).json({ ok:false, error: humanError(err.message) });
+  }
 });
 
 app.post('/api/scene/transition', requireControl, async (req, res) => {

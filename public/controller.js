@@ -138,6 +138,45 @@ function previewGraphicKey(){
   const normalizedStage = (g.type === 'stage' || g.type === 'stageTimes') ? Number(g.stageId || 1) : 0;
   return [g.type, normalizedStage, Number(g.page || 1), Number(g.pageSize || pageSize || 10)].join('|');
 }
+
+function previewLayerKey(layer){
+  return !!(state?.scene?.layerVisibility?.preview?.[layer]);
+}
+function layerLabel(layer){
+  return layer === 'bug' ? 'Bug Text' : layer === 'logo' ? 'Logo' : 'Clock';
+}
+async function takeLayer(layer, forcedTarget=null){
+  const target = forcedTarget || (previewLayerKey(layer) ? 'program' : 'preview');
+  const r = await api('/api/scene/layer-trigger', { method:'POST', body:JSON.stringify({ layer, target }) });
+  if (r.ok) { state.scene = r.scene; sceneState = r.scene; renderSceneManager(); }
+  setTwoStepHint(target === 'preview' ? `${layerLabel(layer)} loaded to Preview. Press it again to send it to Live Output.` : `${layerLabel(layer)} sent to Live Output.`);
+  setLastUpdated();
+}
+async function cutLayer(layer, forcedTarget='program'){
+  const target = forcedTarget || 'program';
+  const r = await api('/api/scene/layer-clear', { method:'POST', body:JSON.stringify({ layer, target }) });
+  if (r.ok) { state.scene = r.scene; sceneState = r.scene; renderSceneManager(); }
+  setTwoStepHint(`${layerLabel(layer)} cut off from ${target === 'both' ? 'Preview and Live Output' : target === 'preview' ? 'Preview' : 'Live Output'}.`);
+  setLastUpdated();
+}
+async function cutLayerBoth(layer){ return cutLayer(layer, 'both'); }
+async function clearMainGraphic(target='program'){
+  const r = await api('/api/scene/main-clear',{method:'POST',body:JSON.stringify({target})});
+  if (r.ok) { state = r.state || { ...state, scene: r.scene }; sceneState = state.scene || r.scene; renderSceneManager(); }
+  setTwoStepHint(target === 'both' ? 'Main graphic cut off from Preview and Live Output. Overlay layers are unchanged.' : target === 'preview' ? 'Main graphic cut off from Preview. Overlay layers are unchanged.' : 'Main graphic cut off from Live Output. Overlay layers are unchanged.');
+  setLastUpdated();
+}
+function typeLabel(type){
+  return type === 'overall' ? 'Overall Leaderboard' : type === 'stage' ? 'Stage Results' : type === 'stageTimes' ? 'Stage Times' : type === 'entries' ? 'Entry List' : 'Graphic';
+}
+async function clearMainGraphicType(type, target='program'){
+  const r = await api('/api/scene/main-clear-type',{method:'POST',body:JSON.stringify({type,target})});
+  if (r.ok) { state = r.state || { ...state, scene: r.scene }; sceneState = state.scene || r.scene; renderSceneManager(); }
+  const where = target === 'both' ? 'Preview and Live Output' : target === 'preview' ? 'Preview' : 'Live Output';
+  const count = r.cleared ? Object.values(r.cleared).filter(Boolean).length : 0;
+  setTwoStepHint(count ? `${typeLabel(type)} cut off from ${where}. Logo, Clock and Bug are unchanged.` : `${typeLabel(type)} was not active on ${where}. Nothing else was changed.`);
+  setLastUpdated();
+}
 function setTwoStepHint(message){
   const el = qs('#twoStepHint') || qs('#eventInfo');
   if(el) el.textContent = message;
@@ -151,11 +190,13 @@ async function take(type=selectedType, stageId=selectedStage, page=selectedPage,
 
   const key = graphicPressKey(type, selectedStage, selectedPage);
   let target = forcedTarget || (key === previewGraphicKey() ? 'program' : 'preview');
-  await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target})});
+  const r = await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target})});
+  if(r?.state){ state = r.state; sceneState = r.state.scene; renderSceneManager(); }
+  else if(r?.scene){ sceneState = r.scene; state.scene = r.scene; renderSceneManager(); }
   setTwoStepHint(target === 'preview' ? 'Loaded to Preview. Press the same button again to send it to Live Output.' : 'Sent to Live Output.');
   setLastUpdated();
 }
-async function clearGraphic(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank',stageId:selectedStage,page:1,pageSize,target:selectedTakeTarget()})}); setLastUpdated(); }
+async function clearGraphic(){ await clearMainGraphic('program'); }
 function openOutput(){ window.open(outputUrl(), '_blank', 'noopener'); }
 function openPreview(){ window.open(previewHttpUrl(), '_blank', 'noopener'); }
 async function copyUrl(){ await navigator.clipboard.writeText(outputUrl()); const btn=qs('#copyUrl'); if(btn){ const old=btn.textContent; btn.textContent='Copied'; setTimeout(()=>btn.textContent=old,1000); } }
@@ -187,6 +228,7 @@ function toggleAutoRundown(){
 socket.on('state', s=>{ state=s; const e=qs('#eventId'); if(e) e.value=s.eventId; if(s.graphic?.type && s.graphic.type!=='blank') selectedType=s.graphic.type; if(s.graphic?.stageId) selectedStage=Number(s.graphic.stageId); if(s.graphic?.page) selectedPage=Number(s.graphic.page); updateActive(); renderPageButtons(); });
 
 qsa('[data-type]').forEach(b=>b.onclick=()=>{selectedType=b.dataset.type; selectedPage=1; loadTotalsForSelection(true);});
+qsa('[data-layer]').forEach(b=>b.onclick=()=>takeLayer(b.dataset.layer));
 qsa('[data-target="stage"]').forEach(b=>b.onclick=()=>{selectedType='stage'; selectedPage=1; updateActive(); loadTotalsForSelection(true);});
 qs('#saveEvent') && (qs('#saveEvent').onclick=loadEvent);
 qs('#refreshData') && (qs('#refreshData').onclick=()=>loadTotalsForSelection(true));
@@ -440,7 +482,55 @@ function sceneGraphicLabel(g){
   if(g.type === 'stage') return `Stage ${g.stageId || ''} Results - Page ${g.page || 1}`;
   return g.title || g.type;
 }
+
+function updateLayerButtons(scene){
+  const vis = scene?.layerVisibility || {};
+  qsa('.layerBtn[data-layer]').forEach(btn => {
+    const layer = btn.dataset.layer;
+    const inPreview = !!vis.preview?.[layer];
+    const inProgram = !!vis.program?.[layer];
+    btn.classList.toggle('active', inPreview || inProgram);
+    btn.title = inProgram ? 'On Live Output' : inPreview ? 'Loaded in Preview. Press again to send to Live Output.' : 'Press once for Preview, twice for Live Output.';
+  });
+}
+
+function setBroadcastLed(id, active, previewOnly=false){
+  const el = qs('#'+id);
+  if(!el) return;
+  el.className = 'led ' + (active ? (previewOnly ? 'orange' : 'green') : 'red');
+}
+function isGraphicType(g, type){ return !!g && g.type === type; }
+function updateBroadcastStatuses(scene){
+  const preview = scene?.preview || {type:'blank'};
+  const program = scene?.program || state.graphic || {type:'blank'};
+  ['overall','stageTimes','stage','entries'].forEach(type => {
+    const inPreview = isGraphicType(preview, type);
+    const inProgram = isGraphicType(program, type);
+    setBroadcastLed(`status-${type}-preview`, inPreview, true);
+    setBroadcastLed(`status-${type}-program`, inProgram, false);
+  });
+  const vis = scene?.layerVisibility || {};
+  ['logo','clock','bug'].forEach(layer => {
+    setBroadcastLed(`status-${layer}-preview`, !!vis.preview?.[layer], true);
+    setBroadcastLed(`status-${layer}-program`, !!vis.program?.[layer], false);
+  });
+  const active = [];
+  ['overall','stageTimes','stage','entries'].forEach(type => {
+    if(isGraphicType(program, type)) active.push(`<span class="activePill livePill">🟢 ${typeLabel(type)}</span>`);
+    else if(isGraphicType(preview, type)) active.push(`<span class="activePill previewPill">🟡 ${typeLabel(type)}</span>`);
+  });
+  ['logo','clock','bug'].forEach(layer => {
+    const name = layerLabel(layer);
+    if(vis.program?.[layer]) active.push(`<span class="activePill livePill">🟢 ${name}</span>`);
+    else if(vis.preview?.[layer]) active.push(`<span class="activePill previewPill">🟡 ${name}</span>`);
+  });
+  const list = qs('#activeGraphicsList');
+  if(list) list.innerHTML = active.length ? active.join('') : '<span class="muted small">Nothing active</span>';
+}
 let sceneState = null;
+let logoLibrary = [];
+let savingLayers = false;
+let saveLayersTimer = null;
 function currentGraphicPayload(){
   return { type:selectedType, stageId:(selectedType==='stage'||selectedType==='stageTimes')?selectedStage:0, page:selectedPage, pageSize, title:labelFor(selectedType, selectedStage, selectedPage) };
 }
@@ -458,9 +548,88 @@ function renderSceneManager(){
   const ml = qs('#mainLayerOpacity'); if(ml) ml.value = main.opacity ?? 100;
   const mlv = qs('#mainLayerOpacityValue'); if(mlv) mlv.textContent = `${main.opacity ?? 100}%`;
   const bug = layers.bug || {};
+  const clock = layers.clock || {};
   const be = qs('#bugEnabled'); if(be) be.checked = !!bug.enabled;
   const bt = qs('#bugText'); if(bt) bt.value = bug.text || '';
-  const ce = qs('#clockEnabled'); if(ce) ce.checked = !!(layers.clock && layers.clock.enabled);
+  const gle = qs('#gsBugLogoEnabled'); if(gle) gle.checked = !!bug.logoEnabled;
+  const ce = qs('#clockEnabled'); if(ce) ce.checked = !!clock.enabled;
+  renderLayerDesignerControls(bug, clock);
+  updateLayerButtons(scene);
+  updateBroadcastStatuses(scene);
+}
+
+
+function setVal(id, value, suffix=''){
+  const el = qs('#'+id); if (el) el.value = value ?? '';
+  const out = qs('#'+id+'Value'); if (out) out.textContent = `${value ?? ''}${suffix}`;
+}
+function renderLayerDesignerControls(bug={}, clock={}){
+  const map = [
+    ['gsBugText', bug.text || '', 'value'],
+    ['gsBugOpacity', bug.opacity ?? 100, '%'], ['gsBugX', bug.x ?? 0, 'px'], ['gsBugY', bug.y ?? 0, 'px'], ['gsBugFontSize', bug.fontSize ?? 28, 'px'],
+    ['gsBugLogoWidth', bug.logoWidth ?? 120, 'px'], ['gsBugLogoOpacity', bug.logoOpacity ?? 100, '%'], ['gsBugLogoUrl', bug.logoUrl || '', 'value'],
+    ['gsClockOpacity', clock.opacity ?? 100, '%'], ['gsClockX', clock.x ?? 0, 'px'], ['gsClockY', clock.y ?? 0, 'px'], ['gsClockFontSize', clock.fontSize ?? 28, 'px']
+  ];
+  map.forEach(([id,val,mode])=>{
+    const el = qs('#'+id); if(!el) return;
+    if(mode === 'checked') el.checked = !!val; else el.value = val;
+    if(mode !== 'value' && mode !== 'checked') { const out=qs('#'+id+'Value'); if(out) out.textContent = `${val}${mode}`; }
+  });
+  renderLogoLibrary();
+}
+function readLayerDesignerControls(){
+  const num = (id, def) => Number(qs('#'+id)?.value || def);
+  return {
+    bug: {
+      enabled: false,
+      logoEnabled: false,
+      opacity: num('gsBugOpacity',100),
+      text: qs('#gsBugText')?.value || '',
+      x: num('gsBugX',0), y: num('gsBugY',0), fontSize: num('gsBugFontSize',28),
+      backgroundOpacity: 72,
+      logoUrl: qs('#gsBugLogoUrl')?.value || '',
+      logoWidth: num('gsBugLogoWidth',120),
+      logoOpacity: num('gsBugLogoOpacity',100)
+    },
+    clock: {
+      enabled: false,
+      opacity: num('gsClockOpacity',100),
+      x: num('gsClockX',0), y: num('gsClockY',0), fontSize: num('gsClockFontSize',28),
+      backgroundOpacity: 72
+    }
+  };
+}
+
+
+function renderLogoLibrary(){
+  const select = qs('#gsLogoLibrary');
+  const current = qs('#gsBugLogoUrl')?.value || '';
+  if (select) {
+    const previous = current || select.value || '';
+    select.innerHTML = '<option value="">No logo selected</option>' + logoLibrary.map(l => `<option value="${l.url}">${(l.fileName || l.url).replace(/^\d+_[a-f0-9]+_/,'')}</option>`).join('');
+    select.value = previous;
+  }
+  const preview = qs('#gsLogoPreview');
+  if (preview) {
+    if (current) preview.innerHTML = `<img src="${current}" alt="Selected logo">`;
+    else preview.textContent = 'No logo selected';
+  }
+}
+async function loadLogoLibrary(){
+  try {
+    const r = await api('/api/assets/logos');
+    if (r.ok) { logoLibrary = r.logos || []; renderLogoLibrary(); }
+  } catch {}
+}
+async function selectLogoFromLibrary(url){
+  const hidden = qs('#gsBugLogoUrl');
+  if (hidden) hidden.value = url || '';
+  renderLogoLibrary();
+  await saveSceneLayers();
+}
+function saveSceneLayersDebounced(){
+  clearTimeout(saveLayersTimer);
+  saveLayersTimer = setTimeout(saveSceneLayers, 80);
 }
 async function loadScene(){
   try { const r = await api('/api/scene'); if(r.ok){ sceneState = r.scene; renderSceneManager(); } } catch {}
@@ -475,30 +644,119 @@ async function takePreviewToProgram(){
 }
 async function clearProgramScene(){ await api('/api/take',{method:'POST',body:JSON.stringify({type:'blank'})}); setLastUpdated(); }
 async function saveSceneLayers(){
+  const fromDesigner = readLayerDesignerControls();
+  // Keep the compact Scene Manager controls in sync with the new Graphics Settings controls.
+  // Layer visibility is controlled only by the Bug Text / Logo / Clock buttons.
+  // Designer fields save content/style only and must not auto-show layers.
   const layers = {
     main: { enabled:true, opacity:Number(qs('#mainLayerOpacity')?.value || 100) },
-    bug: { enabled:!!qs('#bugEnabled')?.checked, opacity:100, text:qs('#bugText')?.value || '' },
-    clock: { enabled:!!qs('#clockEnabled')?.checked, opacity:100 }
+    bug: fromDesigner.bug,
+    clock: fromDesigner.clock
   };
-  const r = await api('/api/scene/layers', { method:'POST', body:JSON.stringify({layers}) });
-  if(r.ok){ sceneState = r.scene; renderSceneManager(); }
+  sceneState = { ...(sceneState || {}), layers };
+  renderLayerDesignerControls(layers.bug, layers.clock);
+  savingLayers = true;
+  try {
+    const r = await api('/api/scene/layers', { method:'POST', body:JSON.stringify({layers}) });
+    if(r.ok){ sceneState = r.scene; renderLayerDesignerControls(r.scene.layers?.bug || layers.bug, r.scene.layers?.clock || layers.clock); }
+  } finally {
+    savingLayers = false;
+  }
 }
+
+async function prepareLogoPngDataUrl(file){
+  // Preserve real PNG alpha. If a downloaded logo has a checkerboard/white background baked in,
+  // remove the bright low-saturation background pixels before upload so programme/preview output is transparent.
+  const rawDataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Could not read logo file'));
+    reader.readAsDataURL(file);
+  });
+  return await new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.naturalWidth || img.width;
+        canvas.height = img.naturalHeight || img.height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.clearRect(0,0,canvas.width,canvas.height);
+        ctx.drawImage(img,0,0);
+        const data = ctx.getImageData(0,0,canvas.width,canvas.height);
+        let transparentPixels = 0;
+        let brightNeutralPixels = 0;
+        for (let i=0;i<data.data.length;i+=4) {
+          const r=data.data[i], g=data.data[i+1], b=data.data[i+2], a=data.data[i+3];
+          if (a < 250) transparentPixels++;
+          const max=Math.max(r,g,b), min=Math.min(r,g,b);
+          if (a > 245 && max > 185 && (max-min) < 28) brightNeutralPixels++;
+        }
+        const total = data.data.length / 4;
+        // Only clean when the PNG appears to have no real alpha and a large bright/grey background.
+        if (transparentPixels < total * 0.01 && brightNeutralPixels > total * 0.18) {
+          for (let i=0;i<data.data.length;i+=4) {
+            const r=data.data[i], g=data.data[i+1], b=data.data[i+2], a=data.data[i+3];
+            const max=Math.max(r,g,b), min=Math.min(r,g,b);
+            if (a > 245 && max > 185 && (max-min) < 28) data.data[i+3] = 0;
+          }
+          ctx.putImageData(data,0,0);
+          resolve(canvas.toDataURL('image/png'));
+        } else {
+          resolve(rawDataUrl);
+        }
+      } catch (_) { resolve(rawDataUrl); }
+    };
+    img.onerror = () => resolve(rawDataUrl);
+    img.src = rawDataUrl;
+  });
+}
+
 function setupSceneManager(){
   qs('#sceneManagerNav') && (qs('#sceneManagerNav').onclick = () => scrollToCard('#sceneManagerCard'));
   qs('#previewCurrent') && (qs('#previewCurrent').onclick = previewCurrent);
   qs('#takePreview') && (qs('#takePreview').onclick = takePreviewToProgram);
   qs('#clearProgram') && (qs('#clearProgram').onclick = clearProgramScene);
   qs('#sceneTransition') && (qs('#sceneTransition').onchange = async e => { const r=await api('/api/scene/transition',{method:'POST',body:JSON.stringify({transition:e.target.value})}); if(r.ok){sceneState=r.scene; renderSceneManager();} });
-  ['#mainLayerOpacity','#bugEnabled','#bugText','#clockEnabled'].forEach(id => {
+  ['#mainLayerOpacity','#gsBugText','#gsBugOpacity','#gsBugX','#gsBugY','#gsBugFontSize','#gsBugLogoWidth','#gsBugLogoOpacity','#gsClockOpacity','#gsClockX','#gsClockY','#gsClockFontSize'].forEach(id => {
     const el=qs(id); if(!el) return;
-    el.addEventListener('input', saveSceneLayers);
+    el.addEventListener('input', saveSceneLayersDebounced);
     el.addEventListener('change', saveSceneLayers);
   });
+  qsa('.layerStep').forEach(btn => btn.addEventListener('click', () => {
+    const input = qs('#' + btn.dataset.layerInput); if(!input) return;
+    const dir = Number(btn.dataset.stepDir || 1), step = Number(input.step || 1) || 1;
+    const min = input.min === '' ? -Infinity : Number(input.min), max = input.max === '' ? Infinity : Number(input.max);
+    input.value = String(Math.max(min, Math.min(max, Number(input.value || 0) + dir * step)));
+    saveSceneLayers();
+  }));
+  qs('#gsRefreshLogos') && (qs('#gsRefreshLogos').onclick = loadLogoLibrary);
+  qs('#gsClearLogo') && (qs('#gsClearLogo').onclick = async () => { await selectLogoFromLibrary(''); });
+  qs('#gsLogoLibrary') && (qs('#gsLogoLibrary').onchange = async e => { await selectLogoFromLibrary(e.target.value || ''); });
+  const logoFile = qs('#gsBugLogoFile');
+  if (logoFile) logoFile.addEventListener('change', async () => {
+    const file = logoFile.files && logoFile.files[0]; if(!file) return;
+    if (file.type !== 'image/png' && !file.name.toLowerCase().endsWith('.png')) { alert('Please select a PNG file so transparency is preserved.'); logoFile.value=''; return; }
+    try {
+      const dataUrl = await prepareLogoPngDataUrl(file);
+      const r = await api('/api/assets/logo', { method:'POST', body:JSON.stringify({ name:file.name, dataUrl }) });
+      if(!r.ok) throw new Error(r.error || 'Logo upload failed');
+      logoLibrary = r.logos || logoLibrary;
+      const url = qs('#gsBugLogoUrl'); if(url) url.value = r.url;
+      renderLogoLibrary();
+      const select = qs('#gsLogoLibrary'); if(select) select.value = r.url;
+      await selectLogoFromLibrary(r.url);
+      await saveSceneLayers();
+      setLastUpdated();
+      logoFile.value = '';
+    } catch (err) { alert(err.message || 'Logo upload failed'); logoFile.value = ''; }
+  });
+  loadLogoLibrary();
   qs('#runMacroClear') && (qs('#runMacroClear').onclick = async () => { await api('/api/macros/run',{method:'POST',body:JSON.stringify({index:0})}); });
   qs('#runMacroTake') && (qs('#runMacroTake').onclick = async () => { await api('/api/macros/run',{method:'POST',body:JSON.stringify({index:1})}); });
   loadScene();
 }
-socket.on('state', s=>{ if(s?.scene){ sceneState=s.scene; renderSceneManager(); } });
+socket.on('state', s=>{ if(s?.scene){ sceneState=s.scene; if(!savingLayers) renderSceneManager(); } });
 window.addEventListener('DOMContentLoaded', setupSceneManager);
 
 // ===== Workflow optimisation pack: undo/redo, presets, per-graphic settings, lock mode, health LEDs, errors, shortcuts =====
@@ -549,6 +807,11 @@ renderGraphicsSettings = function(){
     if (out) out.textContent = graphicsValueText(key, graphicsSettings[key]);
   });
   const scopeSel = qs('#gsScope'); if(scopeSel) scopeSel.value = currentGsScope;
+  const hint = qs('#gsScopeHint');
+  if (hint) {
+    const names = { global:'Global Default', overall:'Overall', stage:'Stage Results', stageTimes:'Stage Times', entries:'Entry List', bug:'Bug / Sponsor layer', clock:'Clock layer' };
+    hint.textContent = `Selected scope: ${names[currentGsScope] || currentGsScope}. Resize, position, opacity, blur and animation controls apply only to this scope.`;
+  }
   setDesignerDisabled(uiSettings.operatorLock);
 };
 loadGraphicsSettings = async function(){
@@ -694,3 +957,11 @@ window.addEventListener('DOMContentLoaded', () => {
     if(btn.dataset.target === 'logs') scrollToCard('#errorCard');
   }));
 });
+
+qsa('.layerBtn').forEach(btn => btn.onclick = () => takeLayer(btn.dataset.layer));
+qsa('.layerCutBtn').forEach(btn => btn.onclick = () => cutLayer(btn.dataset.layer, btn.dataset.target || 'program'));
+qsa('.layerCutBothBtn').forEach(btn => btn.onclick = () => cutLayerBoth(btn.dataset.layer));
+qs('#cutMainPreview') && (qs('#cutMainPreview').onclick = () => clearMainGraphic('preview'));
+qs('#cutMainProgram') && (qs('#cutMainProgram').onclick = () => clearMainGraphic('program'));
+qs('#cutMainBoth') && (qs('#cutMainBoth').onclick = () => clearMainGraphic('both'));
+qsa('.mainTypeCutBtn').forEach(btn => btn.onclick = () => clearMainGraphicType(btn.dataset.cutType, btn.dataset.cutTarget || 'program'));

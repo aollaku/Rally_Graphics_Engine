@@ -53,9 +53,7 @@
           <div class="designerGrid">
             <label>Transition<select id="sceneTransition"><option value="fade">Fade</option><option value="cut">Cut</option><option value="slide">Slide</option><option value="wipe">Wipe</option></select></label>
             <label>Main Layer Opacity <span id="mainLayerOpacityValue">100%</span><input id="mainLayerOpacity" type="range" min="0" max="100" value="100"></label>
-            <label><input id="bugEnabled" type="checkbox"> Bug / Sponsor Layer</label>
-            <label>Bug Text<input id="bugText" placeholder="LIVE / SPONSOR / RALLY"></label>
-            <label><input id="clockEnabled" type="checkbox"> Clock Layer</label>
+            <div class="hint small">Bug Text, Logo and Clock are controlled only from their buttons in the Graphics Output panel. Use Designer to adjust their style/content.</div>
           </div>
           <div class="row actions">
             <button id="runMacroClear" class="outline">Macro: Clear</button>
@@ -84,32 +82,99 @@
       </div>
 
       <div class="column">
-        <section class="card outputCard" id="graphicsCard">
-          <div class="cardTitle">Graphics Output</div>
-          <label>Select Output Type</label>
-          <div class="segmented">
-            <button class="seg active" data-type="overall">🏆 Overall Leaderboard</button>
-            <button class="seg" data-type="stage">⚑ Stage Results</button>
-            <button class="seg" data-type="stageTimes">⏱ Stage Times</button>
-            <button class="seg" data-type="entries">👥 Entry List</button>
+        <section class="card outputCard broadcastControlCard" id="graphicsCard">
+          <div class="cardTitle">Broadcast Controls <span class="badge">Two Step</span></div>
+          <div class="targetPanel">
+            <strong>Two-step trigger</strong>
+            <small id="twoStepHint" class="muted">First press loads Preview. Second press sends the same item to Live Output.</small>
           </div>
-          <label>Stage <small>(for Stage Results / Stage Times)</small></label>
-          <select id="stageSelect"></select>
-          <label>Page <small>10 rows per graphic</small></label>
-          <div id="outputPageButtons" class="stage-grid page-grid compact pageButtons"></div>
-          <div class="row"><span id="pageNo" class="badge">Page 1</span><span id="outputTotalRows" class="muted small totalRows">-- rows</span></div>
+
+          <div class="broadcastGroup rallyGroup">
+            <div class="broadcastGroupTitle">Rally Graphics</div>
+            <div class="broadcastRow" data-row-type="overall">
+              <div class="broadcastName">🏆 Overall Leaderboard</div>
+              <div class="broadcastStatus"><span id="status-overall-preview" class="led red"></span><small>Preview</small><span id="status-overall-program" class="led red"></span><small>Output</small></div>
+              <button class="blue broadcastTakeBtn" data-type="overall">TAKE</button>
+              <button class="outline mainTypeCutBtn" data-cut-type="overall" data-cut-target="preview">CUT Preview</button>
+              <button class="red mainTypeCutBtn" data-cut-type="overall" data-cut-target="program">CUT Output</button>
+              <button class="red mainTypeCutBtn" data-cut-type="overall" data-cut-target="both">CUT Both</button>
+            </div>
+            <div class="broadcastRow" data-row-type="stageTimes">
+              <div class="broadcastName">⏱ Stage Times</div>
+              <div class="broadcastStatus"><span id="status-stageTimes-preview" class="led red"></span><small>Preview</small><span id="status-stageTimes-program" class="led red"></span><small>Output</small></div>
+              <button class="blue broadcastTakeBtn" data-type="stageTimes">TAKE</button>
+              <button class="outline mainTypeCutBtn" data-cut-type="stageTimes" data-cut-target="preview">CUT Preview</button>
+              <button class="red mainTypeCutBtn" data-cut-type="stageTimes" data-cut-target="program">CUT Output</button>
+              <button class="red mainTypeCutBtn" data-cut-type="stageTimes" data-cut-target="both">CUT Both</button>
+            </div>
+            <div class="broadcastRow" data-row-type="stage">
+              <div class="broadcastName">⚑ Stage Results</div>
+              <div class="broadcastStatus"><span id="status-stage-preview" class="led red"></span><small>Preview</small><span id="status-stage-program" class="led red"></span><small>Output</small></div>
+              <button class="blue broadcastTakeBtn" data-type="stage">TAKE</button>
+              <button class="outline mainTypeCutBtn" data-cut-type="stage" data-cut-target="preview">CUT Preview</button>
+              <button class="red mainTypeCutBtn" data-cut-type="stage" data-cut-target="program">CUT Output</button>
+              <button class="red mainTypeCutBtn" data-cut-type="stage" data-cut-target="both">CUT Both</button>
+            </div>
+            <div class="broadcastRow" data-row-type="entries">
+              <div class="broadcastName">👥 Entry List</div>
+              <div class="broadcastStatus"><span id="status-entries-preview" class="led red"></span><small>Preview</small><span id="status-entries-program" class="led red"></span><small>Output</small></div>
+              <button class="blue broadcastTakeBtn" data-type="entries">TAKE</button>
+              <button class="outline mainTypeCutBtn" data-cut-type="entries" data-cut-target="preview">CUT Preview</button>
+              <button class="red mainTypeCutBtn" data-cut-type="entries" data-cut-target="program">CUT Output</button>
+              <button class="red mainTypeCutBtn" data-cut-type="entries" data-cut-target="both">CUT Both</button>
+            </div>
+          </div>
+
+
+          <div class="broadcastGroup stagePageGroup">
+            <div class="broadcastGroupTitle">Stage & Page Controls</div>
+            <label>Stage <small>(for Stage Results / Stage Times)</small></label>
+            <select id="stageSelect"></select>
+            <label>Page <small>10 rows per graphic</small></label>
+            <div id="outputPageButtons" class="stage-grid page-grid compact pageButtons"></div>
+            <div class="row"><span id="pageNo" class="badge">Page 1</span><span id="outputTotalRows" class="muted small totalRows">-- rows</span></div>
+          </div>
+
+          <div class="broadcastGroup layerGroup">
+            <div class="broadcastGroupTitle">Persistent Layers</div>
+            <div class="broadcastRow" data-row-layer="logo">
+              <div class="broadcastName">🖼 Logo</div>
+              <div class="broadcastStatus"><span id="status-logo-preview" class="led red"></span><small>Preview</small><span id="status-logo-program" class="led red"></span><small>Output</small></div>
+              <button class="green broadcastTakeBtn layerBtn" data-layer="logo">TAKE</button>
+              <button class="outline layerCutBtn" data-layer="logo" data-target="preview">CUT Preview</button>
+              <button class="red layerCutBtn" data-layer="logo" data-target="program">CUT Output</button>
+              <button class="red layerCutBtn" data-layer="logo" data-target="both">CUT Both</button>
+            </div>
+            <div class="broadcastRow" data-row-layer="clock">
+              <div class="broadcastName">🕒 Clock</div>
+              <div class="broadcastStatus"><span id="status-clock-preview" class="led red"></span><small>Preview</small><span id="status-clock-program" class="led red"></span><small>Output</small></div>
+              <button class="green broadcastTakeBtn layerBtn" data-layer="clock">TAKE</button>
+              <button class="outline layerCutBtn" data-layer="clock" data-target="preview">CUT Preview</button>
+              <button class="red layerCutBtn" data-layer="clock" data-target="program">CUT Output</button>
+              <button class="red layerCutBtn" data-layer="clock" data-target="both">CUT Both</button>
+            </div>
+            <div class="broadcastRow" data-row-layer="bug">
+              <div class="broadcastName">🏷 Bug Text</div>
+              <div class="broadcastStatus"><span id="status-bug-preview" class="led red"></span><small>Preview</small><span id="status-bug-program" class="led red"></span><small>Output</small></div>
+              <button class="green broadcastTakeBtn layerBtn" data-layer="bug">TAKE</button>
+              <button class="outline layerCutBtn" data-layer="bug" data-target="preview">CUT Preview</button>
+              <button class="red layerCutBtn" data-layer="bug" data-target="program">CUT Output</button>
+              <button class="red layerCutBtn" data-layer="bug" data-target="both">CUT Both</button>
+            </div>
+          </div>
+
+          <div class="activeGraphicsPanel">
+            <strong>Active Graphics</strong>
+            <div id="activeGraphicsList" class="activeGraphicsList"><span class="muted small">Nothing active</span></div>
+          </div>
+
           <input id="pageSize" type="hidden" value="10">
           <label>Output URL</label>
           <input id="outputUrl" readonly>
-          <div class="targetPanel">
-            <strong>Two-step trigger</strong>
-            <small id="twoStepHint" class="muted">Press a graphic once to load Preview. Press the same graphic again to send it to Live Output.</small>
-          </div>
           <div class="row actions">
             <button id="openOutput" class="outline">↗ Open Output</button>
             <button id="openPreview" class="outline">👁 Open Preview</button>
             <button id="copyUrl" class="outline">📋 Copy Output URL</button>
-            <button id="clearGraphic" class="red">🗑 Clear Graphic</button>
           </div>
           <div class="tip">Make sure “Transparent Background” is enabled in your graphics software if you overlay this on a stream.</div>
           <div class="row refreshRow">
@@ -177,14 +242,16 @@
             <button class="designerTab active" data-designer-tab="position" type="button">Resize / Position</button>
             <button class="designerTab" data-designer-tab="look" type="button">Opacity / Look</button>
             <button class="designerTab" data-designer-tab="animation" type="button">Animation</button>
+            <button class="designerTab" data-designer-tab="layers" type="button">Clock / Bug</button>
             <button class="designerTab" data-designer-tab="presets" type="button">Presets</button>
             <button class="designerTab" data-designer-tab="safety" type="button">Safe / Lock</button>
           </div>
           <div class="designerToolbar">
-            <label>Settings Scope <select id="gsScope"><option value="global">Global Default</option><option value="overall">Overall</option><option value="stage">Stage Results</option><option value="stageTimes">Stage Times</option><option value="entries">Entry List</option></select></label>
+            <label>Settings Scope <select id="gsScope"><option value="global">Global Default</option><option value="overall">Overall</option><option value="stage">Stage Results</option><option value="stageTimes">Stage Times</option><option value="entries">Entry List</option><option value="bug">Bug / Sponsor</option><option value="clock">Clock</option></select></label>
             <button id="gsUndo" class="outline" type="button">↶ Undo</button>
             <button id="gsRedo" class="outline" type="button">↷ Redo</button>
           </div>
+          <p class="muted small" id="gsScopeHint">Choose Global, a graphic type, Bug/Sponsor, or Clock. The controls below apply only to the selected scope.</p>
           <div class="designerPanel active" data-designer-panel="position">
             <div class="designerGrid">
               <label>Scale <span id="gs_scale_value">100%</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_scale" data-step-dir="-1" type="button">◀</button><input id="gs_scale" data-gs="scale" type="range" min="0.1" max="3" step="0.01"><button class="stepBtn" data-step-target="gs_scale" data-step-dir="1" type="button">▶</button></div></label>
@@ -212,6 +279,33 @@
               <label>Animation Duration <span id="gs_animationDuration_value">280ms</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="-1" type="button">◀</button><input id="gs_animationDuration" data-gs="animationDuration" type="range" min="0" max="5000" step="10"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="1" type="button">▶</button></div></label>
               <label>Easing <span id="gs_easing_value">ease-out</span><select id="gs_easing" data-gs="easing"><option value="linear">Linear</option><option value="ease">Ease</option><option value="ease-in">Ease In</option><option value="ease-out">Ease Out</option><option value="ease-in-out">Ease In Out</option><option value="cubic-bezier(.34,1.56,.64,1)">Bounce</option></select></label>
             </div>
+          </div>
+          <div class="designerPanel" data-designer-panel="layers">
+            <div class="designerGrid">
+              <div class="hint small">Visibility is controlled only by the Bug Text / Logo / Clock buttons in Graphics Output. These settings only change content, size, position and style.</div>
+              <label>Bug / Sponsor Text<input id="gsBugText" placeholder="LIVE / SPONSOR / RALLY"></label>
+              <label>Bug Opacity <span id="gsBugOpacityValue">100%</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugOpacity" data-step-dir="-1" type="button">◀</button><input id="gsBugOpacity" type="range" min="0" max="100" step="1"><button class="stepBtn layerStep" data-layer-input="gsBugOpacity" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Bug X Position <span id="gsBugXValue">0px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugX" data-step-dir="-1" type="button">◀</button><input id="gsBugX" type="range" min="-1000" max="1000" step="1"><button class="stepBtn layerStep" data-layer-input="gsBugX" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Bug Y Position <span id="gsBugYValue">0px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugY" data-step-dir="-1" type="button">◀</button><input id="gsBugY" type="range" min="-1000" max="1000" step="1"><button class="stepBtn layerStep" data-layer-input="gsBugY" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Bug Font Size <span id="gsBugFontSizeValue">28px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugFontSize" data-step-dir="-1" type="button">◀</button><input id="gsBugFontSize" type="range" min="10" max="120" step="1"><button class="stepBtn layerStep" data-layer-input="gsBugFontSize" data-step-dir="1" type="button">▶</button></div></label>
+              <div class="logoLibraryBox">
+                <label>Upload Logo First<input id="gsBugLogoFile" type="file" accept="image/png"></label>
+                <div class="row actions compactActions">
+                  <button id="gsRefreshLogos" class="outline smallBtn" type="button">Refresh Logos</button>
+                  <button id="gsClearLogo" class="outline smallBtn" type="button">No Logo</button>
+                </div>
+                <label>Select Logo From Library<select id="gsLogoLibrary"><option value="">No logo selected</option></select></label>
+                <div id="gsLogoPreview" class="logoPreviewBox">No logo selected</div>
+              </div>
+              <label>Logo Width <span id="gsBugLogoWidthValue">120px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugLogoWidth" data-step-dir="-1" type="button">◀</button><input id="gsBugLogoWidth" type="range" min="20" max="600" step="5"><button class="stepBtn layerStep" data-layer-input="gsBugLogoWidth" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Logo Opacity <span id="gsBugLogoOpacityValue">100%</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsBugLogoOpacity" data-step-dir="-1" type="button">◀</button><input id="gsBugLogoOpacity" type="range" min="0" max="100" step="1"><button class="stepBtn layerStep" data-layer-input="gsBugLogoOpacity" data-step-dir="1" type="button">▶</button></div></label>
+              <input id="gsBugLogoUrl" type="hidden">
+              <label>Clock Opacity <span id="gsClockOpacityValue">100%</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsClockOpacity" data-step-dir="-1" type="button">◀</button><input id="gsClockOpacity" type="range" min="0" max="100" step="1"><button class="stepBtn layerStep" data-layer-input="gsClockOpacity" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Clock X Position <span id="gsClockXValue">0px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsClockX" data-step-dir="-1" type="button">◀</button><input id="gsClockX" type="range" min="-1000" max="1000" step="1"><button class="stepBtn layerStep" data-layer-input="gsClockX" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Clock Y Position <span id="gsClockYValue">0px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsClockY" data-step-dir="-1" type="button">◀</button><input id="gsClockY" type="range" min="-1000" max="1000" step="1"><button class="stepBtn layerStep" data-layer-input="gsClockY" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Clock Font Size <span id="gsClockFontSizeValue">28px</span><div class="stepControl"><button class="stepBtn layerStep" data-layer-input="gsClockFontSize" data-step-dir="-1" type="button">◀</button><input id="gsClockFontSize" type="range" min="10" max="120" step="1"><button class="stepBtn layerStep" data-layer-input="gsClockFontSize" data-step-dir="1" type="button">▶</button></div></label>
+            </div>
+            <p class="muted small">Upload PNG logos into the library first, then select which logo is active. Transparency is preserved.</p>
           </div>
           <div class="designerPanel" data-designer-panel="presets">
             <div class="designerGrid">

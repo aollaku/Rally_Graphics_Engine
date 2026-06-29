@@ -36,6 +36,32 @@ function resolveGraphicsSettings(settings={}, graphicType='global'){
   const scoped = base.perGraphic && graphicType && base.perGraphic[graphicType] ? base.perGraphic[graphicType] : {};
   return { ...base, ...scoped, perGraphic: base.perGraphic || {} };
 }
+function layerScopeSettings(scope){
+  return resolveGraphicsSettings(graphicsSettings || {}, scope);
+}
+function applyDesignerScopeToLayer(el, scope, fallback={}){
+  if (!el) return;
+  const s = layerScopeSettings(scope);
+  const n = (v, def) => Number.isFinite(Number(v)) ? Number(v) : def;
+  const pct = (v, def=100) => Math.max(0, Math.min(100, n(v, def))) / 100;
+  const x = n(s.x, fallback.x || 0);
+  const y = n(s.y, fallback.y || 0);
+  const scale = n(s.scale, 1);
+  const opacity = pct(s.opacity, fallback.opacity ?? 100);
+  const blur = n(s.blur, 0);
+  const brightness = n(s.brightness, 100);
+  const contrast = n(s.contrast, 100);
+  const radius = n(s.radius, fallback.radius || 10);
+  const speed = Math.max(0.1, n(s.animationSpeed, 1));
+  const duration = Math.max(0, n(s.animationDuration, 280)) / speed;
+  el.style.transform = `translate(${x}px, ${y}px) scale(${scale})`;
+  el.style.opacity = String(opacity);
+  el.style.filter = `blur(${blur}px) brightness(${brightness}%) contrast(${contrast}%)`;
+  el.style.webkitFilter = el.style.filter;
+  el.style.borderRadius = `${radius}px`;
+  el.style.transition = `transform ${duration}ms ${s.easing || 'ease-out'}, opacity ${duration}ms ${s.easing || 'ease-out'}, filter ${duration}ms ${s.easing || 'ease-out'}`;
+  el.style.transformOrigin = 'center center';
+}
 function applyGraphicsSettings(settings={}, graphicType='global'){
   graphicsSettings = settings || graphicsSettings || {};
   const effectiveSettings = resolveGraphicsSettings(graphicsSettings, graphicType);
@@ -72,15 +98,28 @@ function applySceneLayers(scene={}){
   let bug = document.getElementById('sceneBug');
   if (!bug) { bug = document.createElement('div'); bug.id='sceneBug'; bug.className='scene-bug'; document.body.appendChild(bug); }
   const bugLayer = layers.bug || {};
-  bug.textContent = bugLayer.text || '';
-  bug.style.display = bugLayer.enabled ? 'block' : 'none';
-  bug.style.opacity = String(Math.max(0, Math.min(100, Number(bugLayer.opacity ?? 100))) / 100);
+  const visibility = (scene?.layerVisibility && scene.layerVisibility[OUTPUT_MODE]) || { bug:false, logo:false, clock:false };
+  const pct = (v, def=100) => String(Math.max(0, Math.min(100, Number(v ?? def))) / 100);
+  // Bug text, Logo and Clock visibility is controlled ONLY by the controller layer buttons.
+  // The settings panel only stores content/style and never auto-shows these layers.
+  const showBugText = !!visibility.bug && !!bugLayer.text;
+  const showLogo = !!visibility.logo && !!bugLayer.logoUrl;
+  bug.style.display = (showBugText || showLogo) ? 'flex' : 'none';
+  bug.classList.toggle('logo-only', showLogo && !showBugText);
+  bug.style.fontSize = `${Number(bugLayer.fontSize || 28)}px`;
+  bug.style.backgroundColor = showBugText ? `rgba(0,0,0,${pct(bugLayer.backgroundOpacity,72)})` : 'transparent';
+  applyDesignerScopeToLayer(bug, 'bug', { x: bugLayer.x || 0, y: bugLayer.y || 0, opacity: bugLayer.opacity ?? 100, radius: 10 });
+  const logoHtml = showLogo ? `<img class="scene-bug-logo" src="${String(bugLayer.logoUrl).replace(/"/g,'&quot;')}" style="width:${Number(bugLayer.logoWidth || 120)}px;opacity:${pct(bugLayer.logoOpacity)};background:transparent">` : '';
+  const textHtml = (showBugText && bugLayer.text) ? `<span class="scene-bug-text">${String(bugLayer.text).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</span>` : '';
+  bug.innerHTML = `${logoHtml}${textHtml}`;
   let clock = document.getElementById('sceneClock');
   if (!clock) { clock = document.createElement('div'); clock.id='sceneClock'; clock.className='scene-clock'; document.body.appendChild(clock); }
   const clockLayer = layers.clock || {};
-  clock.style.display = clockLayer.enabled ? 'block' : 'none';
-  clock.style.opacity = String(Math.max(0, Math.min(100, Number(clockLayer.opacity ?? 100))) / 100);
-  if (clockLayer.enabled) clock.textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  clock.style.display = visibility.clock ? 'block' : 'none';
+  clock.style.fontSize = `${Number(clockLayer.fontSize || 28)}px`;
+  clock.style.backgroundColor = `rgba(0,0,0,${pct(clockLayer.backgroundOpacity,72)})`;
+  applyDesignerScopeToLayer(clock, 'clock', { x: clockLayer.x || 0, y: clockLayer.y || 0, opacity: clockLayer.opacity ?? 100, radius: 10 });
+  if (visibility.clock) clock.textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
 setInterval(() => { try { window.__lastScene && applySceneLayers(window.__lastScene); } catch {} }, 1000);
 
@@ -196,7 +235,16 @@ async function render(state){
   const myRenderSeq = ++renderSeq;
   const g=outputGraphic(state)||{};
   applySceneLayers(state?.scene);
-  if(g.type==='blank'){ hideAllGraphics(); applyGraphicsSettings(graphicsSettings || {}, g.type); return; }
+  if(g.type==='blank'){
+    hideAllGraphics();
+    // Mark this blank state as displayed. Without this, an older/non-blank render can remain
+    // visible or be re-applied after a Preview CUT on some browsers because the blank render
+    // never becomes the displayed key.
+    lastDisplayedKey = renderKey;
+    pendingRenderKey = '';
+    applyGraphicsSettings(graphicsSettings || {}, g.type);
+    return;
+  }
   const page=g.page||1, size=g.pageSize||10, eventId=state.eventId;
   let data;
   if(g.type==='overall') data=await api(`/api/event/${eventId}/overall?limit=${page*size}`);
@@ -317,7 +365,48 @@ function renderResult(title, rows, type){
   </div>`;
 }
 
-socket.on('state', s => { window.__lastScene = s?.scene; if (s?.uiSettings) { uiSettings = { ...uiSettings, ...s.uiSettings }; applySafeGuides(); } if (s?.graphicsSettings) applyGraphicsSettings(s.graphicsSettings, outputGraphic(s)?.type); applySceneLayers(s?.scene); render(s); });
+
+function targetMatchesCurrentMode(target){
+  return target === 'both' || (target === 'preview' && OUTPUT_MODE === 'preview') || (target === 'program' && OUTPUT_MODE === 'program');
+}
+function forceClearMainDom(){
+  hideAllGraphics();
+  lastDisplayedKey = 'forced-clear|' + OUTPUT_MODE + '|' + Date.now();
+  pendingRenderKey = '';
+  lastRenderKey = lastDisplayedKey;
+}
+function forceClearLayerDom(layer){
+  const layersToClear = layer && layer !== 'all' ? [layer] : ['bug','logo','clock'];
+  for (const item of layersToClear) {
+    if (item === 'bug' || item === 'logo') {
+      const bug = document.getElementById('sceneBug');
+      if (bug) {
+        if (item === 'bug') bug.querySelectorAll('.scene-bug-text').forEach(n => n.remove());
+        if (item === 'logo') bug.querySelectorAll('.scene-bug-logo').forEach(n => n.remove());
+        const hasText = !!bug.querySelector('.scene-bug-text');
+        const hasLogo = !!bug.querySelector('.scene-bug-logo');
+        bug.style.display = (hasText || hasLogo) ? 'flex' : 'none';
+        if (!hasText && !hasLogo) bug.innerHTML = '';
+      }
+    }
+    if (item === 'clock') {
+      const clock = document.getElementById('sceneClock');
+      if (clock) { clock.style.display = 'none'; clock.textContent = ''; }
+    }
+  }
+}
+function forceClearFromServer(msg={}){
+  if (!targetMatchesCurrentMode(msg.target || 'program')) return;
+  if (msg.kind === 'layer') forceClearLayerDom(msg.layer || 'all');
+  if (msg.kind === 'main') forceClearMainDom();
+  if (msg.kind === 'mainType') {
+    const currentType = outputGraphic(window.__lastFullState || {})?.type;
+    if (!msg.type || currentType === msg.type) forceClearMainDom();
+  }
+}
+
+socket.on('state', s => { window.__lastFullState = s; window.__lastScene = s?.scene; if (s?.uiSettings) { uiSettings = { ...uiSettings, ...s.uiSettings }; applySafeGuides(); } if (s?.graphicsSettings) applyGraphicsSettings(s.graphicsSettings, outputGraphic(s)?.type); applySceneLayers(s?.scene); render(s); });
+socket.on('clearRender', msg => forceClearFromServer(msg));
 socket.on('graphicsSettings', s => applyGraphicsSettings(s));
 socket.on('uiSettings', s => { uiSettings = { ...uiSettings, ...s }; applySafeGuides(); });
 async function refreshSharedState(){ try { const r = await api('/api/state'); if (r.ok) await render(r.state); } catch {} }
