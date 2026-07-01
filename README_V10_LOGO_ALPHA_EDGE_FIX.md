@@ -1,0 +1,1 @@
+V10 logo alpha edge fix: removes thin black matte/fringe lines from PNG logos in preview and program output by decontaminating semi-transparent edge pixels at display time. Existing uploaded logos do not need to be re-uploaded. Page selector limit remains 1-9.

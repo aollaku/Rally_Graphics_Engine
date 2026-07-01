@@ -253,6 +253,12 @@ html,body{
   height:auto;
   object-fit:contain;
   flex:0 0 auto;
+  background:transparent!important;
+  transform:translateZ(0);
+  -webkit-transform:translateZ(0);
+  backface-visibility:hidden;
+  -webkit-backface-visibility:hidden;
+  image-rendering:auto;
 }
 .scene-bug-text{
   display:inline-block;
@@ -267,3 +273,18 @@ html,body{
 .template-row{min-width:0;}
 .template-table{width:100%;box-sizing:border-box;}
 .template-board{box-sizing:border-box;max-width:none;}
+
+/* v12: Logo no-flash fix. In logo-only mode the overlay box must not redraw a border,
+   padding or background around the PNG. The clock keeps updating once per second, but
+   the logo DOM is no longer touched every second. */
+.scene-bug.logo-only{
+  background:transparent!important;
+  border:0!important;
+  padding:0!important;
+  text-shadow:none!important;
+  box-shadow:none!important;
+}
+.scene-bug.logo-only .scene-bug-logo{
+  display:block!important;
+  opacity:1;
+}

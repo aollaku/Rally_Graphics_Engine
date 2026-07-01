@@ -101,6 +101,57 @@ function applyGraphicsSettings(settings={}, graphicType='global'){
 }
 
 
+
+function repairLogoAlphaMatte(img){
+  // Some PNG logos are exported with semi-transparent edge pixels premultiplied against black.
+  // Browsers then show a very thin black fringe on transparent outputs. This fixes the displayed
+  // logo in the output/preview page without changing the uploaded file.
+  if (!img || img.dataset.alphaMatteFixed === '1') return;
+  const src = img.currentSrc || img.src || '';
+  if (!src || src.startsWith('data:image/png;base64,')) return;
+  img.dataset.alphaMatteFixed = '1';
+  const work = new Image();
+  work.crossOrigin = 'anonymous';
+  work.onload = () => {
+    try {
+      const w = work.naturalWidth || work.width;
+      const h = work.naturalHeight || work.height;
+      if (!w || !h || w * h > 9000000) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext('2d', { willReadFrequently:true });
+      ctx.clearRect(0,0,w,h);
+      ctx.drawImage(work,0,0);
+      const image = ctx.getImageData(0,0,w,h);
+      const d = image.data;
+      let changed = false;
+      for (let i=0;i<d.length;i+=4) {
+        const a = d[i+3];
+        if (a === 0) { d[i]=0; d[i+1]=0; d[i+2]=0; continue; }
+        if (a < 6) { d[i+3]=0; changed = true; continue; }
+        if (a > 0 && a < 252) {
+          const r=d[i], g=d[i+1], b=d[i+2];
+          const max=Math.max(r,g,b);
+          // Un-premultiply only darker anti-aliased pixels; this removes black matte hairlines.
+          if (max < 245) {
+            const f = 255 / a;
+            d[i] = Math.min(255, Math.round(r * f));
+            d[i+1] = Math.min(255, Math.round(g * f));
+            d[i+2] = Math.min(255, Math.round(b * f));
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        ctx.putImageData(image,0,0);
+        img.src = canvas.toDataURL('image/png');
+      }
+    } catch (_) {}
+  };
+  work.onerror = () => {};
+  work.src = src;
+}
+
 function applySceneLayers(scene={}){
   const layers = scene?.layers || {};
   const main = layers.main || { enabled:true, opacity:100 };
@@ -121,9 +172,44 @@ function applySceneLayers(scene={}){
   bug.style.fontSize = `${Number(bugLayer.fontSize || 28)}px`;
   bug.style.backgroundColor = showBugText ? `rgba(0,0,0,${pct(bugLayer.backgroundOpacity,72)})` : 'transparent';
   applyDesignerScopeToLayer(bug, 'bug', { x: bugLayer.x || 0, y: bugLayer.y || 0, opacity: bugLayer.opacity ?? 100, radius: 10 });
-  const logoHtml = showLogo ? `<img class="scene-bug-logo" src="${String(activeLogoUrl).replace(/"/g,'&quot;')}" style="width:${Number(bugLayer.logoWidth || 120)}px;opacity:${pct(bugLayer.logoOpacity)};background:transparent">` : '';
-  const textHtml = (showBugText && bugLayer.text) ? `<span class="scene-bug-text">${String(bugLayer.text).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</span>` : '';
-  bug.innerHTML = `${logoHtml}${textHtml}`;
+  // Keep the same DOM nodes between state refreshes. Replacing innerHTML every second
+  // forced the PNG to reload/re-alpha-process and made the logo blink. Only change the
+  // logo/text when the selected content actually changes.
+  let logoImg = bug.querySelector('.scene-bug-logo');
+  if (showLogo) {
+    if (!logoImg) {
+      logoImg = document.createElement('img');
+      logoImg.className = 'scene-bug-logo';
+      logoImg.alt = 'Logo';
+      bug.prepend(logoImg);
+    }
+    const cleanLogoUrl = String(activeLogoUrl);
+    if (logoImg.dataset.originalSrc !== cleanLogoUrl) {
+      logoImg.dataset.originalSrc = cleanLogoUrl;
+      logoImg.dataset.alphaMatteFixed = '';
+      logoImg.onload = () => repairLogoAlphaMatte(logoImg);
+      logoImg.src = cleanLogoUrl;
+    }
+    const nextWidth = `${Number(bugLayer.logoWidth || 120)}px`;
+    const nextOpacity = pct(bugLayer.logoOpacity);
+    if (logoImg.style.width !== nextWidth) logoImg.style.width = nextWidth;
+    if (logoImg.style.opacity !== nextOpacity) logoImg.style.opacity = nextOpacity;
+    if (logoImg.style.background !== 'transparent') logoImg.style.background = 'transparent';
+  } else if (logoImg) {
+    logoImg.remove();
+  }
+
+  let textSpan = bug.querySelector('.scene-bug-text');
+  if (showBugText && bugLayer.text) {
+    if (!textSpan) {
+      textSpan = document.createElement('span');
+      textSpan.className = 'scene-bug-text';
+      bug.appendChild(textSpan);
+    }
+    textSpan.textContent = String(bugLayer.text);
+  } else if (textSpan) {
+    textSpan.remove();
+  }
   let clock = document.getElementById('sceneClock');
   if (!clock) { clock = document.createElement('div'); clock.id='sceneClock'; clock.className='scene-clock'; document.body.appendChild(clock); }
   const clockLayer = layers.clock || {};
@@ -133,7 +219,15 @@ function applySceneLayers(scene={}){
   applyDesignerScopeToLayer(clock, 'clock', { x: clockLayer.x || 0, y: clockLayer.y || 0, opacity: clockLayer.opacity ?? 100, radius: 10 });
   if (visibility.clock) clock.textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
 }
-setInterval(() => { try { window.__lastScene && applySceneLayers(window.__lastScene); } catch {} }, 1000);
+function updateSceneClockOnly(){
+  try {
+    const scene = window.__lastScene || {};
+    const visibility = (scene?.layerVisibility && scene.layerVisibility[OUTPUT_MODE]) || {};
+    const clock = document.getElementById('sceneClock');
+    if (clock && visibility.clock) clock.textContent = new Date().toLocaleTimeString('en-GB', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  } catch {}
+}
+setInterval(updateSceneClockOnly, 1000);
 
 function applySafeGuides(){
   let guides = document.getElementById('safeGuidesOverlay');
