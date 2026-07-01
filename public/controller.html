@@ -11,7 +11,7 @@
     <div class="brand"><div class="logo">RG</div><div><strong>Rally Graphics</strong><span>Djames Results</span></div></div>
     <nav>
       <button class="nav active" data-target="graphics">Graphics</button>
-      <button class="nav" data-target="scenes">Scenes</button>
+      <button class="nav" data-target="broadcast">Broadcast Engine</button>
       <button class="nav" data-target="outputs">Outputs</button>
       <button class="nav" data-target="designer">Designer</button>
       <button class="nav" data-target="data">Data</button>
@@ -36,30 +36,6 @@
       <div class="column">
 
 
-        <section class="card sceneCard" id="sceneManagerCard">
-          <div class="cardTitle">Scene Manager <span class="badge live">Preview / Program</span></div>
-          <p class="muted small">Prepare the next graphic in Preview, then Take it to Program. This is the broadcast workflow layer above the normal buttons.</p>
-          <div class="sceneGrid">
-            <div class="sceneBox"><strong>PREVIEW</strong><span id="previewLabel">Blank</span></div>
-            <div class="sceneBox program"><strong>PROGRAM</strong><span id="programLabel">Blank</span></div>
-          </div>
-          <div class="row actions">
-            <button id="previewCurrent" class="outline">Send Current to Preview</button>
-            <button id="takePreview" class="blue">TAKE Preview → Program</button>
-            <button id="clearProgram" class="red">Clear Program</button>
-          </div>
-          <div class="designerGrid">
-            <label>Transition<select id="sceneTransition"><option value="fade">Fade</option><option value="cut">Cut</option><option value="slide">Slide</option><option value="wipe">Wipe</option></select></label>
-            <label>Main Layer Opacity <span id="mainLayerOpacityValue">100%</span><input id="mainLayerOpacity" type="range" min="0" max="100" value="100"></label>
-            <div class="hint small">Bug Text, Logo and Clock are controlled only from their buttons in the Graphics Output panel. Use Designer to adjust their style/content.</div>
-          </div>
-          <div class="row actions">
-            <button id="runMacroClear" class="outline">Macro: Clear</button>
-            <button id="runMacroTake" class="outline">Macro: Take Preview</button>
-          </div>
-          <p class="muted small">Remote API: POST /api/remote/trigger with action=preview, take, takePreview or clear.</p>
-        </section>
-
         <section class="card eventCard">
           <div class="cardTitle">Event Information <span class="badge live">Live</span></div>
           <h1 id="eventTitle">Loading...</h1>
@@ -67,6 +43,58 @@
           <p id="eventInfo" class="muted"></p>
         </section>
 
+
+        <section class="card broadcastEngineCard" id="broadcastEngineCard">
+          <div class="cardTitle">Broadcast Engine <span class="badge live">Phase 9</span></div>
+          <p class="muted small">Real FFmpeg/MediaMTX broadcast engine. Main workflow: publish video into MediaMTX, overlay the transparent RGE graphics with FFmpeg, then stream programme output to YouTube. Chromium is used only as the hidden transparent graphics renderer, not as the programme source.</p>
+          <div class="engineGlobalGrid">
+            <label>FFmpeg Path <input id="be_ffmpegPath" placeholder="ffmpeg"></label>
+            <label>RGE Graphics URL <input id="be_inputUrl" placeholder="http://app1:3000/output/live"></label>
+            <label>Resolution Width <input id="be_width" type="number" min="320" max="7680" step="1"></label>
+            <label>Resolution Height <input id="be_height" type="number" min="240" max="4320" step="1"></label>
+            <label>Frame Rate <input id="be_frameRate" type="number" min="1" max="120" step="1"></label>
+            <label>Video Bitrate <input id="be_videoBitrate" placeholder="6000k"></label>
+            <label>Audio Bitrate <input id="be_audioBitrate" placeholder="160k"></label>
+          </div>
+          <div class="incomingStreamBox">
+            <div class="cardSubTitle">Incoming Stream Input <span class="badge">separate MediaMTX + FFmpeg containers</span></div>
+            <p class="muted small">This does not change Output Live, Output Preview, or Controller Preview. It only feeds the Broadcast Engine overlay pipeline.</p>
+            <div class="engineGlobalGrid">
+              <label>Protocol
+                <select id="be_incomingProtocol">
+                  <option value="rtmp">RTMP</option>
+                  <option value="srt">SRT</option>
+                  <option value="rtsp">RTSP</option>
+                  <option value="hls">HLS</option>
+                  <option value="udp">UDP/MPEG-TS</option>
+                  <option value="mediamtx">MediaMTX path</option>
+                  <option value="custom">Custom URL</option>
+                </select>
+              </label>
+              <label>Incoming URL <input id="be_incomingUrl" placeholder="rtmp://mediamtx:1935/live"></label>
+              <label>MediaMTX Path <input id="be_mediamtxPath" placeholder="live"></label>
+              <label class="outputProfileStatus"><input id="be_incomingEnabled" type="checkbox"> Input Enabled</label>
+              <label class="outputProfileStatus"><input id="be_overlayEnabled" type="checkbox"> Overlay RGE Graphics</label>
+              <label>Notes <input id="be_incomingNotes" placeholder="Camera/program feed notes"></label>
+            </div>
+            <div class="row actions">
+              <button id="beUseIncomingForOverlay" class="blue">Use Incoming Stream For Overlay Outputs</button>
+              <button id="beSetRtmpLive" class="outline">RTMP live</button>
+              <button id="beSetRtspLive" class="outline">RTSP live</button>
+              <button id="beSetSrtLive" class="outline">SRT live</button>
+              <button id="bePreviewIncoming" class="outline">Open HLS Preview</button>
+            </div>
+          </div>
+          <div class="row actions engineToolbar">
+            <button id="beSave" class="blue">Save Engine Config</button>
+            <button id="beRefresh" class="outline">Refresh Status</button>
+            <button id="beStartYoutubeMainPair" class="green">Start YouTube Main + Backup</button>
+            <button id="beStartYoutubeGraphicsPair" class="green">Start YouTube Graphics + Backup</button>
+            <button id="beStopAll" class="red">Stop All Outputs</button>
+          </div>
+          <div id="broadcastEngineGrid" class="broadcastEngineGrid"></div>
+          <div class="hint small">Main workflow: publish incoming video to MediaMTX (RTMP/SRT/RTSP), press “Use Incoming Stream For Overlay Outputs”, then start YouTube Main + Backup. For graphics-only streaming, start YouTube Graphics + Backup. Use primary server rtmp://a.rtmp.youtube.com/live2/YOUR_PRIMARY_KEY and backup server rtmp://b.rtmp.youtube.com/live2/YOUR_BACKUP_KEY. Keep stream keys private.</div>
+        </section>
 
       </div>
 
@@ -176,6 +204,18 @@
           </div>
         </section>
 
+        <section class="card outputManagerCard" id="outputManagerCard">
+          <div class="cardTitle">Broadcast Output Manager <span class="badge live">Phase 8</span></div>
+          <p class="muted small">Configure output profiles without changing the stable graphics renderer. Program and Preview stay 16:9 and broadcast-safe.</p>
+          <div class="outputManagerToolbar row actions">
+            <button id="outputSave" class="blue">Save Output Profiles</button>
+            <button id="outputReset" class="outline">Restore Defaults</button>
+            <button id="outputRefresh" class="outline">Refresh</button>
+          </div>
+          <div id="outputProfileGrid" class="outputProfileGrid"></div>
+          <div class="hint small">NDI/SRT/RTMP profiles store workflow details and URLs for operators. They do not alter the renderer layout, so previews and live output keep the correct shape and size.</div>
+        </section>
+
         <section class="card adminCard" id="dataCard">
           <div class="cardTitle">Database / Config Import & Export</div>
           <div class="hint">Full Config export now includes users and password hashes, so keep the file private.</div>
@@ -199,14 +239,18 @@
         <section class="card healthCard" id="healthCard">
           <div class="cardTitle">Health / Status <span class="badge">LED Monitor</span></div>
           <div class="healthGrid">
-            <div class="healthItem"><span class="led" id="healthApiLed"></span><div><strong>Application API</strong><span id="healthApiText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthApiLed"></span><div><strong>RGE Controller</strong><span id="healthApiText">Checking...</span></div></div>
             <div class="healthItem"><span class="led" id="healthDbLed"></span><div><strong>Postgres Database</strong><span id="healthDbText">Checking...</span></div></div>
             <div class="healthItem"><span class="led" id="healthInternetLed"></span><div><strong>Internet / Rally Data</strong><span id="healthInternetText">Checking...</span></div></div>
             <div class="healthItem"><span class="led" id="healthPreviewLed"></span><div><strong>Preview Output</strong><span id="healthPreviewText">Waiting...</span></div></div>
             <div class="healthItem"><span class="led" id="healthProgramLed"></span><div><strong>Program Output</strong><span id="healthProgramText">Waiting...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthFfmpegLed"></span><div><strong>FFmpeg Engine</strong><span id="healthFfmpegText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthMediamtxLed"></span><div><strong>MediaMTX</strong><span id="healthMediamtxText">Checking...</span></div></div>
+            <div class="healthItem"><span class="led" id="healthContainersLed"></span><div><strong>Containers</strong><span id="healthContainersText">Checking...</span></div></div>
             <div class="healthItem"><span class="led" id="healthConfigLed"></span><div><strong>Config Version</strong><span id="healthConfigText">Checking...</span></div></div>
           </div>
-          <div class="row actions"><button id="refreshHealth" class="outline">↻ Refresh Health</button></div>
+          <div class="healthDetails" id="healthDetails">Waiting for live service details...</div>
+          <div class="row actions"><button id="refreshHealth" class="outline">↻ Refresh Health</button><span class="muted small">Auto-refreshes every 5 seconds.</span></div>
         </section>
 
 
@@ -259,9 +303,13 @@
           </div>
           <div class="designerPanel" data-designer-panel="animation">
             <div class="designerGrid">
+              <label>Take Animation <span id="gs_animationType_value">fade</span><select id="gs_animationType" data-gs="animationType"><option value="none">None / Instant</option><option value="fade">Fade</option><option value="slide-left">Slide from Right</option><option value="slide-right">Slide from Left</option><option value="slide-up">Slide from Bottom</option><option value="slide-down">Slide from Top</option><option value="zoom">Zoom In</option><option value="grow">Grow</option></select></label>
+              <label>Cut Animation <span id="gs_outAnimationType_value">fade</span><select id="gs_outAnimationType" data-gs="outAnimationType"><option value="none">None / Instant</option><option value="fade">Fade</option><option value="slide-left">Slide to Left</option><option value="slide-right">Slide to Right</option><option value="slide-up">Slide Up</option><option value="slide-down">Slide Down</option><option value="zoom">Zoom Out</option><option value="shrink">Shrink</option></select></label>
               <label>Animation Speed <span id="gs_animationSpeed_value">1.0x</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_animationSpeed" data-step-dir="-1" type="button">◀</button><input id="gs_animationSpeed" data-gs="animationSpeed" type="range" min="0.1" max="5" step="0.1"><button class="stepBtn" data-step-target="gs_animationSpeed" data-step-dir="1" type="button">▶</button></div></label>
               <label>Animation Duration <span id="gs_animationDuration_value">280ms</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="-1" type="button">◀</button><input id="gs_animationDuration" data-gs="animationDuration" type="range" min="0" max="5000" step="10"><button class="stepBtn" data-step-target="gs_animationDuration" data-step-dir="1" type="button">▶</button></div></label>
+              <label>Row Stagger <span id="gs_rowStagger_value">0ms</span><div class="stepControl"><button class="stepBtn" data-step-target="gs_rowStagger" data-step-dir="-1" type="button">◀</button><input id="gs_rowStagger" data-gs="rowStagger" type="range" min="0" max="250" step="5"><button class="stepBtn" data-step-target="gs_rowStagger" data-step-dir="1" type="button">▶</button></div></label>
               <label>Easing <span id="gs_easing_value">ease-out</span><select id="gs_easing" data-gs="easing"><option value="linear">Linear</option><option value="ease">Ease</option><option value="ease-in">Ease In</option><option value="ease-out">Ease Out</option><option value="ease-in-out">Ease In Out</option><option value="cubic-bezier(.34,1.56,.64,1)">Bounce</option></select></label>
+              <div class="hint small">Animation settings change only the Take/Cut motion. They do not change graphic size, position or layout.</div>
             </div>
           </div>
           <div class="designerPanel" data-designer-panel="layers">

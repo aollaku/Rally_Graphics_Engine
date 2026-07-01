@@ -15,6 +15,7 @@ const qsa = s => [...document.querySelectorAll(s)];
 const token = new URLSearchParams(location.search).get('token') || '';
 const tokenPart = token ? `?token=${encodeURIComponent(token)}` : '';
 const auth = token ? { 'x-rally-token': token } : {};
+const isTabletController = document.body.classList.contains('tablet-controller');
 
 function withToken(path){ if (!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
 function api(path, opts={}){ return fetch(withToken(path), {headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
@@ -41,12 +42,12 @@ function initStages(){
     for(let i=1;i<=20;i++){
       const b=document.createElement('button');
       b.textContent = String(i); b.title = 'Stage '+i;
-      b.onclick = ()=>{ if(selectedType!=='stageTimes') selectedType='stage'; selectedStage=i; selectedPage=1; updateActive(); loadTotalsForSelection(true); };
+      b.onclick = ()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); if(selectedType!=='stageTimes') selectedType='stage'; selectedStage=i; selectedPage=1; tabletSelectedKey=tabletSelectionKey(); updateActive(); loadTotalsForSelection(true); };
       box.appendChild(b);
     }
   });
   const sel = qs('#stageSelect');
-  if(sel){ sel.innerHTML=''; for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent='Stage '+i; sel.appendChild(o); } sel.onchange=()=>{ selectedStage=Number(sel.value); if(selectedType!=='stageTimes') selectedType='stage'; selectedPage=1; updateActive(); loadTotalsForSelection(true); }; }
+  if(sel){ sel.innerHTML=''; for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent='Stage '+i; sel.appendChild(o); } sel.onchange=()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); selectedStage=Number(sel.value); if(selectedType!=='stageTimes') selectedType='stage'; selectedPage=1; tabletSelectedKey=tabletSelectionKey(); updateActive(); loadTotalsForSelection(true); }; }
 }
 function updateActive(){
   qsa('[data-type]').forEach(b=>b.classList.toggle('active', b.dataset.type===selectedType));
@@ -60,14 +61,16 @@ function renderPageButtons(){
   const boxes = qsa('.pageButtons');
   boxes.forEach(box => {
     box.innerHTML='';
-    const pages = totalPagesFor(selectedType, selectedStage);
+    // Tablet controller must always show 20 page buttons, matching the stage selector.
+    // Desktop controller keeps the data-driven number of pages.
+    const pages = isTabletController ? 20 : totalPagesFor(selectedType, selectedStage);
     for(let p=1;p<=pages;p++){
       const b=document.createElement('button');
       const start=(p-1)*pageSize+1, end=Math.min(p*pageSize, totalFor(selectedType, selectedStage)||p*pageSize);
       b.textContent=String(p);
       b.title=`${labelFor(selectedType, selectedStage, p)}: ${start}-${end}`;
       b.className = p===selectedPage ? 'active' : '';
-      b.onclick=()=>take(selectedType, selectedStage, p);
+      b.onclick=()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. Manual page loaded to preview.'); tabletSelectedKey=tabletSelectionKey(); take(selectedType, selectedStage, p, isTabletController ? 'preview' : null); };
       box.appendChild(b);
     }
   });
@@ -85,10 +88,18 @@ async function loadTotalsForSelection(autoTake=false){
     if(selectedType==='overall') totals.overall=total;
     else if(selectedType==='entries') totals.entries=total;
     else totals.stage[selectedStage]=total;
+    updateTabletEventNameFromData(res.data);
   }
-  selectedPage = Math.min(selectedPage, totalPagesFor(selectedType, selectedStage));
+  if(!isTabletController) selectedPage = Math.min(selectedPage, totalPagesFor(selectedType, selectedStage));
   renderPageButtons();
-  if(autoTake) await take(selectedType, selectedStage, selectedPage);
+  if(autoTake) await take(selectedType, selectedStage, selectedPage, isTabletController ? 'preview' : null);
+}
+
+function updateTabletEventNameFromData(data={}){
+  const el = qs('#eventNameDisplay');
+  if(!el) return;
+  const name = displayEventName(data, qs('#eventId')?.value || state.eventId || '');
+  if(name && !/^RESULTS ON THE WEB$/i.test(name)) el.textContent = name;
 }
 
 async function loadAllTotals(){
@@ -107,6 +118,7 @@ async function loadEvent(){
   await api('/api/event',{method:'POST',body:JSON.stringify({eventId})});
   const info = await api(`/api/event/${eventId}/info`);
   if(info.ok){
+    const tabletName=qs('#eventNameDisplay'); if(tabletName) tabletName.textContent = displayEventName(info.data, eventId);
     const title=qs('#eventTitle'); if(title) title.textContent = info.data.eventTitle || `Event ${eventId}`;
     const date=qs('#eventDate'); if(date) date.textContent = info.data.eventDate || '';
     const text=qs('#eventInfo'); if(text) text.textContent = info.data.subtitle || 'Event loaded.';
@@ -169,6 +181,21 @@ async function clearMainGraphic(target='program'){
 function typeLabel(type){
   return type === 'overall' ? 'Overall Leaderboard' : type === 'stage' ? 'Stage Results' : type === 'stageTimes' ? 'Stage Times' : type === 'entries' ? 'Entry List' : 'Graphic';
 }
+function displayEventName(infoData={}, eventId=''){
+  const cleanName = v => String(v || '').replace(/\s+/g,' ').trim();
+  const sub = cleanName(infoData?.subtitle || infoData?.title || infoData?.eventTitle || '');
+  // For DJames/BTRDA pages the useful on-air event/stage name is usually in the
+  // graphic title after the first dash, for example:
+  // FINAL OVERALL POSITIONS AFTER STAGE 1 - LLANGOWER 1 - PAGE 6
+  // The tablet top box must show LLANGOWER 1, not the generic web title.
+  const fromGraphic = sub.match(/[-–—]\s*(.+?)(?:\s*[-–—]\s*PAGE\s*\d+)?$/i);
+  if (fromGraphic && fromGraphic[1]) return fromGraphic[1].trim().toUpperCase();
+  const candidates = [infoData?.eventName, infoData?.eventTitle, infoData?.name, infoData?.title]
+    .map(cleanName).filter(Boolean);
+  const generic = /^(results on the web|event|leader boards?|leaderboards?|overall results?)$/i;
+  const nonGeneric = candidates.find(x => !generic.test(x));
+  return (nonGeneric || candidates[0] || `Event ${eventId}`).toUpperCase();
+}
 async function clearMainGraphicType(type, target='program'){
   const r = await api('/api/scene/main-clear-type',{method:'POST',body:JSON.stringify({type,target})});
   if (r.ok) { state = r.state || { ...state, scene: r.scene }; sceneState = state.scene || r.scene; renderSceneManager(); }
@@ -182,6 +209,7 @@ function setTwoStepHint(message){
   if(el) el.textContent = message;
 }
 async function take(type=selectedType, stageId=selectedStage, page=selectedPage, forcedTarget=null){
+  if(isTabletController) tabletSetLogoPreview('');
   selectedType=type; selectedPage=Math.max(1, Number(page||1));
   if(type==='stage' || type==='stageTimes') selectedStage=Number(stageId||selectedStage||1);
   if(type!=='stage' && type!=='stageTimes') stageId=0;
@@ -196,7 +224,168 @@ async function take(type=selectedType, stageId=selectedStage, page=selectedPage,
   setTwoStepHint(target === 'preview' ? 'Loaded to Preview. Press the same button again to send it to Live Output.' : 'Sent to Live Output.');
   setLastUpdated();
 }
-async function clearGraphic(){ await clearMainGraphic('program'); }
+
+
+// Tablet v2 controller helpers: all selector buttons load Preview only; TAKE TO PGM airs the preview.
+let tabletLogoSlot = 1;
+let tabletAutoPageTimer = null;
+let tabletAutoPageRunId = 0;
+let tabletAutoPageRunning = false;
+let tabletSelectedKey = '';
+function tabletSetLogoPreview(url){
+  const overlay = qs('#tabletLogoPreviewOverlay');
+  const img = qs('#tabletLogoPreviewImg');
+  if(!overlay || !img) return;
+  if(url){
+    img.src = url + (String(url).includes('?') ? '&' : '?') + 'logoPreviewTs=' + Date.now();
+    overlay.classList.add('active');
+    const empty = qs('#tabletPreviewEmpty');
+    if(empty) empty.style.display = 'none';
+  } else {
+    overlay.classList.remove('active');
+    img.removeAttribute('src');
+  }
+}
+function tabletSelectionKey(type=selectedType, stage=selectedStage){ return `${type}:${(type==='stage'||type==='stageTimes')?stage:0}`; }
+function updateTabletUiFromState(){
+  if(!isTabletController) return;
+  const previewEmpty = qs('#tabletPreviewEmpty');
+  const previewType = state?.scene?.preview?.type || 'blank';
+  const logoOverlayActive = !!qs('#tabletLogoPreviewOverlay')?.classList.contains('active');
+  if(previewEmpty) previewEmpty.style.display = (!logoOverlayActive && previewType === 'blank') ? 'flex' : 'none';
+  const logoOnAir = !!state?.scene?.layerVisibility?.program?.logo;
+  const logoInPreview = !!state?.scene?.layerVisibility?.preview?.logo;
+  const onAirSlot = Number(state?.scene?.activeLogoSlotProgram || state?.scene?.activeLogoSlot || tabletLogoSlot || 1);
+  const previewSlot = Number(state?.scene?.activeLogoSlotPreview || state?.scene?.activeLogoSlot || tabletLogoSlot || 1);
+  const takeBugBtn = qs('#takeBug');
+  if(takeBugBtn) takeBugBtn.classList.toggle('onair', logoOnAir);
+  qsa('.logoSlot').forEach(btn => {
+    const slot = Number(btn.dataset.logoSlot || 1);
+    const isSelected = slot === tabletLogoSlot;
+    btn.classList.toggle('selected', isSelected || (logoInPreview && slot === previewSlot));
+    btn.classList.toggle('onair', logoOnAir && slot === onAirSlot);
+  });
+}
+async function tabletTakePreviewToPgm(){
+  const r = await api('/api/scene/take-preview', { method:'POST', body:JSON.stringify({}) });
+  if(r?.state){ state = r.state; sceneState = r.state.scene; renderSceneManager(); }
+  setTwoStepHint('Preview sent to Live Output.');
+  updateTabletUiFromState();
+  setLastUpdated();
+}
+async function tabletToggleBug(){
+  // TAKE BUG now behaves like TAKE TO PGM for the logo preview:
+  // Logo 1/2 press = preview only, TAKE BUG = send that selected logo to Program.
+  const logoOnAir = !!state?.scene?.layerVisibility?.program?.logo;
+  const onAirSlot = Number(state?.scene?.activeLogoSlotProgram || state?.scene?.activeLogoSlot || 0);
+  const sameSlotOnAir = logoOnAir && onAirSlot === Number(tabletLogoSlot);
+
+  const endpoint = sameSlotOnAir ? '/api/scene/layer-clear' : '/api/scene/layer-trigger';
+  const body = sameSlotOnAir
+    ? { layer:'logo', target:'program' }
+    : { layer:'logo', target:'program', slot: tabletLogoSlot };
+
+  const r = await api(endpoint, { method:'POST', body:JSON.stringify(body) });
+  if(r.ok){
+    state.scene = r.scene;
+    sceneState = r.scene;
+    renderSceneManager();
+    setTwoStepHint(sameSlotOnAir ? `Logo ${tabletLogoSlot} cut from output.` : `Logo ${tabletLogoSlot} sent to output.`);
+  } else {
+    setTwoStepHint(r.error || `Logo ${tabletLogoSlot} could not be sent to output.`);
+  }
+  updateTabletUiFromState();
+  setLastUpdated();
+}
+async function tabletSelectLogoSlot(slot){
+  tabletStopAutoPages('', false);
+  tabletLogoSlot = Number(slot || 1);
+  // Load the chosen logo into Preview only. It does not go on air until TAKE BUG is pressed.
+  const r = await api('/api/scene/layer-trigger', { method:'POST', body:JSON.stringify({ layer:'logo', target:'preview', slot: tabletLogoSlot }) });
+  if(r.ok){
+    state.scene = r.scene;
+    sceneState = r.scene;
+    renderSceneManager();
+    tabletSetLogoPreview(state?.scene?.logoUrls?.preview || '');
+    setTwoStepHint(`Logo ${tabletLogoSlot} loaded to Preview. Press TAKE BUG to put it on air.`);
+  } else {
+    setTwoStepHint(r.error || `Logo ${tabletLogoSlot} could not be loaded to Preview.`);
+  }
+  updateTabletUiFromState();
+  setLastUpdated();
+}
+function tabletStopAutoPages(message='ALL [AUTO] stopped.'){
+  tabletAutoPageRunId += 1;
+  tabletAutoPageRunning = false;
+  if(tabletAutoPageTimer){ clearTimeout(tabletAutoPageTimer); tabletAutoPageTimer=null; }
+  const btn = qs('#allAutoPages');
+  if(btn) btn.classList.remove('active');
+  if(message) setTwoStepHint(message);
+}
+async function tabletAllAutoPages(){
+  if(!isTabletController) return;
+  const btn = qs('#allAutoPages');
+
+  // Pressing ALL [AUTO] while it is green must always stop it.
+  if(tabletAutoPageRunning){
+    tabletStopAutoPages('ALL [AUTO] stopped.');
+    return;
+  }
+
+  // Lock to the operator selection visible now, not to any previous auto run or socket/program state.
+  const autoType = selectedType;
+  const autoStage = (autoType === 'stage' || autoType === 'stageTimes') ? Number(selectedStage || 1) : 0;
+  tabletSelectedKey = tabletSelectionKey(autoType, autoStage || selectedStage);
+
+  // Refresh totals for the selected graphic before calculating pages.
+  await loadTotalsForSelection(false);
+  const pages = isTabletController ? 20 : totalPagesFor(autoType, autoStage || selectedStage);
+  let p = 1;
+
+  tabletAutoPageRunId += 1;
+  const runId = tabletAutoPageRunId;
+  tabletAutoPageRunning = true;
+  if(btn) btn.classList.add('active');
+  setTwoStepHint(`ALL [AUTO] started for ${typeLabel(autoType)}. It will play pages 1-${pages}, 8 seconds each.`);
+
+  const run = async () => {
+    if(runId !== tabletAutoPageRunId || !tabletAutoPageRunning) return;
+    // If the operator has selected another GFX/stage, stop instead of jumping back.
+    if(tabletSelectedKey !== tabletSelectionKey(autoType, autoStage || selectedStage)){
+      tabletStopAutoPages('ALL [AUTO] stopped because a different GFX was selected.');
+      return;
+    }
+    if(p > pages){
+      tabletStopAutoPages('ALL [AUTO] complete.');
+      return;
+    }
+    selectedType = autoType;
+    if(autoType === 'stage' || autoType === 'stageTimes') selectedStage = autoStage;
+    selectedPage = p;
+    updateActive();
+    renderPageButtons();
+
+    // For ALL [AUTO], send directly to program. The preview monitor still follows state.
+    const sendStage = (autoType === 'stage' || autoType === 'stageTimes') ? autoStage : 0;
+    await take(autoType, sendStage, p, 'program');
+    if(runId !== tabletAutoPageRunId || !tabletAutoPageRunning) return;
+    p += 1;
+    tabletAutoPageTimer = setTimeout(run, 8000);
+  };
+  run();
+}
+
+async function clearGraphic(){ await clearMainGraphic('program'); if(isTabletController) updateTabletUiFromState(); }
+async function clearPreviewGraphic(){
+  tabletSetLogoPreview('');
+  await clearMainGraphic('preview');
+  if(isTabletController){
+    const r = await api('/api/scene/layer-clear', { method:'POST', body:JSON.stringify({ layer:'logo', target:'preview' }) });
+    if(r.ok){ state.scene = r.scene; sceneState = r.scene; renderSceneManager(); }
+    setTwoStepHint('Preview cleared. Live output is unchanged.');
+    updateTabletUiFromState();
+  }
+}
 function openOutput(){ window.open(outputUrl(), '_blank', 'noopener'); }
 function openPreview(){ window.open(previewHttpUrl(), '_blank', 'noopener'); }
 async function copyUrl(){ await navigator.clipboard.writeText(outputUrl()); const btn=qs('#copyUrl'); if(btn){ const old=btn.textContent; btn.textContent='Copied'; setTimeout(()=>btn.textContent=old,1000); } }
@@ -225,14 +414,31 @@ function toggleAutoRundown(){
   const sec=Number(qs('#rundownSeconds')?.value||10); rundownTimer=setInterval(takeNext, sec*1000); if(btn)btn.textContent='⏸ Stop Auto'; takeNext();
 }
 
-socket.on('state', s=>{ state=s; const e=qs('#eventId'); if(e) e.value=s.eventId; if(s.graphic?.type && s.graphic.type!=='blank') selectedType=s.graphic.type; if(s.graphic?.stageId) selectedStage=Number(s.graphic.stageId); if(s.graphic?.page) selectedPage=Number(s.graphic.page); updateActive(); renderPageButtons(); });
+socket.on('state', s=>{
+  const oldEventId = state?.eventId;
+  state=s;
+  const e=qs('#eventId'); if(e) e.value=s.eventId;
+  if(isTabletController){
+    // Tablet selector is operator-owned. Live/program state must update LEDs only;
+    // it must not change the chosen GFX/stage/page, otherwise ALL [AUTO] can jump
+    // back to a previous graphic after a socket refresh.
+    if(s.eventId && s.eventId !== oldEventId) loadEvent().then(updateTabletUiFromState);
+    updateTabletUiFromState();
+    return;
+  }
+  if(s.graphic?.type && s.graphic.type!=='blank') selectedType=s.graphic.type;
+  if(s.graphic?.stageId) selectedStage=Number(s.graphic.stageId);
+  if(s.graphic?.page) selectedPage=Number(s.graphic.page);
+  updateActive(); renderPageButtons(); updateTabletUiFromState();
+});
 
-qsa('[data-type]').forEach(b=>b.onclick=()=>{selectedType=b.dataset.type; selectedPage=1; loadTotalsForSelection(true);});
+qsa('[data-type]').forEach(b=>b.onclick=()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New GFX loaded to preview.'); selectedType=b.dataset.type; selectedPage=1; tabletSelectedKey=tabletSelectionKey(); loadTotalsForSelection(true);});
 qsa('[data-layer]').forEach(b=>b.onclick=()=>takeLayer(b.dataset.layer));
 qsa('[data-target="stage"]').forEach(b=>b.onclick=()=>{selectedType='stage'; selectedPage=1; updateActive(); loadTotalsForSelection(true);});
 qs('#saveEvent') && (qs('#saveEvent').onclick=loadEvent);
 qs('#refreshData') && (qs('#refreshData').onclick=()=>loadTotalsForSelection(true));
 qs('#clearGraphic') && (qs('#clearGraphic').onclick=clearGraphic);
+qs('#clearPreview') && (qs('#clearPreview').onclick=clearPreviewGraphic);
 qs('#openOutput') && (qs('#openOutput').onclick=openOutput);
 qs('#openPreview') && (qs('#openPreview').onclick=openPreview);
 qs('#copyUrl') && (qs('#copyUrl').onclick=copyUrl);
@@ -243,8 +449,12 @@ qs('#addRundown') && (qs('#addRundown').onclick=addCurrentToRundown);
 qs('#takeNext') && (qs('#takeNext').onclick=takeNext);
 qs('#clearRundown') && (qs('#clearRundown').onclick=clearRundown);
 qs('#autoRundown') && (qs('#autoRundown').onclick=toggleAutoRundown);
+qs('#takeToPgm') && (qs('#takeToPgm').onclick=tabletTakePreviewToPgm);
+qs('#takeBug') && (qs('#takeBug').onclick=tabletToggleBug);
+qsa('.logoSlot').forEach(b=>b.onclick=()=>tabletSelectLogoSlot(b.dataset.logoSlot));
+qs('#allAutoPages') && (qs('#allAutoPages').onclick=tabletAllAutoPages);
 
-setOutputFields(); initStages(); updateActive(); loadEvent(); startAutoRefresh();
+setOutputFields(); initStages(); updateActive(); loadEvent().then(updateTabletUiFromState); startAutoRefresh();
 
 async function refreshAdmin(){
   const dbText = qs('#dbStatus'), dbDot = qs('#dbDot');
@@ -377,8 +587,8 @@ qsa('.nav[data-target]').forEach(btn => {
     const target = btn.dataset.target;
     if(target === 'dashboard') scrollToCard('#dashboardCard');
     if(target === 'graphics') scrollToCard('#graphicsCard');
-    if(target === 'scenes') scrollToCard('#sceneManagerCard');
-    if(target === 'outputs') scrollToCard('#graphicsCard');
+    if(target === 'broadcast') scrollToCard('#broadcastEngineCard');
+    if(target === 'outputs') scrollToCard('#outputManagerCard');
     if(target === 'designer') scrollToCard('#graphicsSettingsCard');
     if(target === 'data') scrollToCard('#dataCard');
     if(target === 'settings') { await loadMe(); await loadUsers(); scrollToCard('#userCard'); }
@@ -391,7 +601,7 @@ const graphicsDefaults = {
   scale: 1, x: 0, y: 0, width: 1920, height: 1080,
   opacity: 100, backgroundOpacity: 100, borderOpacity: 100, shadowOpacity: 0,
   blur: 0, brightness: 100, contrast: 100,
-  animationSpeed: 1, animationDuration: 280, easing: 'ease-out', radius: 0
+  animationSpeed: 1, animationDuration: 280, animationType: 'fade', outAnimationType: 'fade', rowStagger: 0, easing: 'ease-out', radius: 0
 };
 let graphicsSettings = { ...graphicsDefaults };
 let graphicsSaveTimer = null;
@@ -402,6 +612,8 @@ function graphicsValueText(key, value){
   if (['opacity','backgroundOpacity','borderOpacity','shadowOpacity','brightness','contrast'].includes(key)) return Math.round(n) + '%';
   if (key === 'animationSpeed') return n.toFixed(1) + 'x';
   if (key === 'animationDuration') return Math.round(n) + 'ms';
+  if (key === 'rowStagger') return Math.round(n) + 'ms';
+  if (key === 'animationType' || key === 'outAnimationType') return String(val || 'fade');
   return String(value);
 }
 function renderGraphicsSettings(){
@@ -913,7 +1125,7 @@ function setupWorkflowDesigner(){
   qs('#gsLoadPreset') && (qs('#gsLoadPreset').onclick = loadNamedPreset);
   qs('#gsDeletePreset') && (qs('#gsDeletePreset').onclick = deleteNamedPreset);
 }
-function ledClass(status){ if(status==='green' || status===true) return 'green'; if(status==='orange') return 'orange'; return 'red'; }
+function ledClass(status){ if(status==='green' || status===true) return 'green'; if(status==='yellow' || status==='orange') return status; if(status==='grey' || status==='gray') return 'grey'; return 'red'; }
 function setLed(id, status, text){ const led=qs('#'+id+'Led'); const tx=qs('#'+id+'Text'); if(led) led.className='led '+ledClass(status); if(tx) tx.textContent=text; }
 async function refreshHealth(){
   try {
@@ -926,8 +1138,44 @@ async function refreshHealth(){
     setLed('healthInternet', r.internet?.ok?'green':(r.internet?.warning?'orange':'red'), r.internet?.message || 'Checking');
     setLed('healthPreview', r.outputs?.previewOnline?'green':'orange', r.outputs?.preview || 'Open /preview page');
     setLed('healthProgram', r.outputs?.programOnline?'green':'orange', r.outputs?.program || 'Open /output page');
+    setLed('healthFfmpeg', r.broadcast?.ffmpeg?.status || (r.broadcast?.ffmpeg?.ok?'green':'red'), r.broadcast?.ffmpeg?.message || 'FFmpeg Engine not configured');
+    setLed('healthMediamtx', r.broadcast?.mediamtx?.status || (r.broadcast?.mediamtx?.ok?'green':'red'), r.broadcast?.mediamtx?.message || 'MediaMTX not configured');
+    const containerVals = Object.values(r.containers || {});
+    const activeContainers = containerVals.filter(c=>c.status !== 'grey');
+    const runningCount = activeContainers.filter(c=>c.status==='green' || c.status==='yellow').length;
+    const redCount = activeContainers.filter(c=>c.status==='red').length;
+    const warnCount = activeContainers.filter(c=>c.status==='orange').length;
+    const disabledCount = containerVals.length - activeContainers.length;
+    const containerText = `${runningCount}/${activeContainers.length || 0} active services running${disabledCount ? ` · ${disabledCount} optional` : ''}`;
+    setLed('healthContainers', redCount ? 'red' : (warnCount ? 'orange' : 'green'), containerText);
     setLed('healthConfig', 'green', `${r.version || 'unknown'} / config v${r.config?.exportedConfigVersion || 3}`);
-  } catch(err){ setLed('healthApi','red','Application API offline'); }
+    renderHealthDetails(r);
+  } catch(err){ setLed('healthApi','red','Application API offline'); setLed('healthFfmpeg','red','No status'); setLed('healthMediamtx','red','No status'); }
+}
+function renderHealthDetails(r){
+  const box = qs('#healthDetails'); if(!box) return;
+  const serviceLabel = {
+    app1:'RGE Controller', app2:'RGE Worker', nginx:'Nginx Reverse Proxy', postgres:'Postgres Database',
+    ffmpegEngine:'FFmpeg Engine', mediamtx:'MediaMTX'
+  };
+  const containers = Object.entries(r.containers || {})
+    .filter(([name]) => ['app1','app2','nginx','postgres','ffmpegEngine','mediamtx'].includes(name))
+    .map(([name,c]) => `<tr><td><span class="led mini ${ledClass(c.status)}"></span>${serviceLabel[name] || name}</td><td>${c.status || 'unknown'}</td><td>${c.message || ''}</td></tr>`).join('')
+    || '<tr><td colspan="3">No RGE services reported</td></tr>';
+  const paths = (r.broadcast?.mediamtx?.paths || []).map(p => `<tr><td>${p.name || ''}</td><td>${p.ready ? 'Ready' : 'Idle'}</td><td>${p.readers || 0}</td></tr>`).join('') || '<tr><td colspan="3">No active MediaMTX paths</td></tr>';
+  const jobsObj = r.broadcast?.ffmpeg?.jobs || {};
+  const jobs = Object.entries(jobsObj).map(([name,j]) => `<tr><td>${name}</td><td>${j.running ? 'Running' : 'Stopped'}</td><td>${j.pid || ''}</td></tr>`).join('') || '<tr><td colspan="3">No FFmpeg jobs running</td></tr>';
+  const broadcastSummary = r.broadcast?.summary || {};
+  box.innerHTML = `<div class="healthTables">
+    <div><h4>RGE Service Health</h4><table><thead><tr><th>Service</th><th>Status</th><th>Details</th></tr></thead><tbody>${containers}</tbody></table></div>
+    <div><h4>Broadcast Status</h4><table><tbody>
+      <tr><td>Input</td><td>${broadcastSummary.input || 'Idle / disconnected'}</td></tr>
+      <tr><td>Graphics</td><td>${broadcastSummary.graphics || 'RGE output ready'}</td></tr>
+      <tr><td>Outputs</td><td>${broadcastSummary.outputs || 'Idle'}</td></tr>
+    </tbody></table></div>
+    <div><h4>FFmpeg Jobs</h4><table><thead><tr><th>Job</th><th>Status</th><th>PID</th></tr></thead><tbody>${jobs}</tbody></table></div>
+    <div><h4>MediaMTX Paths</h4><table><thead><tr><th>Path</th><th>Status</th><th>Readers</th></tr></thead><tbody>${paths}</tbody></table></div>
+  </div>`;
 }
 async function refreshErrors(){
   const list=qs('#errorList'); if(!list) return;
@@ -936,9 +1184,114 @@ async function refreshErrors(){
     list.innerHTML = items.length ? items.map(e=>`<div class="errorItem ${e.severity||'orange'}"><span class="led ${e.severity||'orange'}"></span><div><strong>${e.kind||'system'}</strong><p>${e.message||'Unknown issue'}</p><small>${new Date(e.time).toLocaleString()}</small></div></div>`).join('') : '<div class="errorEmpty">No errors reported.</div>';
   } catch(err){ list.innerHTML='<div class="errorItem red"><span class="led red"></span><div><strong>Application API</strong><p>Cannot read error list.</p></div></div>'; }
 }
+
+
+// Phase 8 - Broadcast Output Manager
+const DEFAULT_OUTPUT_PROFILES = {
+  program: { enabled:true, label:'Program', resolution:'1920x1080', aspect:'16:9', transport:'http', url:'/output/live', notes:'Main live graphics output for encoder or mixer browser source.' },
+  preview: { enabled:true, label:'Preview', resolution:'1920x1080', aspect:'16:9', transport:'http', url:'/preview/live', notes:'Safe preview output for checking before TAKE.' },
+  ndi: { enabled:false, label:'NDI', resolution:'1920x1080', aspect:'16:9', transport:'ndi', url:'', notes:'Use the Program URL with an external browser-to-NDI tool.' },
+  srt: { enabled:false, label:'SRT', resolution:'1920x1080', aspect:'16:9', transport:'srt', url:'', notes:'Reserved profile for SRT output workflow.' },
+  youtube: { enabled:false, label:'YouTube', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store destination/encoder notes here. Keep stream keys private.' },
+  facebook: { enabled:false, label:'Facebook', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store destination/encoder notes here. Keep stream keys private.' },
+  twitch: { enabled:false, label:'Twitch', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store destination/encoder notes here. Keep stream keys private.' },
+  social: { enabled:false, label:'Social Vertical', resolution:'1080x1920', aspect:'9:16', transport:'http', url:'/output/live?profile=social', notes:'Reference profile for future social/vertical workflow.' }
+};
+let outputSettings = { ...DEFAULT_OUTPUT_PROFILES };
+const OUTPUT_ORDER = ['program','preview','ndi','srt','youtube','facebook','twitch','social'];
+function absoluteOutputUrl(value){
+  const v = String(value || '').trim();
+  if(!v) return '';
+  if(/^https?:\/\//i.test(v) || /^srt:|^rtmp:|^ndi:/i.test(v)) return v;
+  const host = location.hostname || 'localhost';
+  if(v.startsWith('/output') || v.startsWith('/preview')) return `http://${host}:8080${v}`;
+  if(v.startsWith('/')) return location.origin + v;
+  return v;
+}
+function renderOutputProfiles(){
+  const grid = qs('#outputProfileGrid'); if(!grid) return;
+  grid.innerHTML = '';
+  OUTPUT_ORDER.forEach(key => {
+    const p = { ...(DEFAULT_OUTPUT_PROFILES[key] || {}), ...((outputSettings || {})[key] || {}) };
+    const card = document.createElement('div');
+    card.className = 'outputProfileCard';
+    card.dataset.outputKey = key;
+    card.innerHTML = `
+      <div class="outputProfileHead">
+        <strong>${p.label || key}</strong>
+        <label class="outputProfileStatus"><span class="led ${p.enabled ? 'green':'orange'}"></span><input data-output-field="enabled" type="checkbox" ${p.enabled ? 'checked':''}> Enabled</label>
+      </div>
+      <label>Name <input data-output-field="label" value="${String(p.label||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}"></label>
+      <div class="designerGrid twoCol">
+        <label>Resolution <select data-output-field="resolution">
+          ${['1920x1080','1280x720','3840x2160','1080x1920','custom'].map(x=>`<option value="${x}" ${p.resolution===x?'selected':''}>${x}</option>`).join('')}
+        </select></label>
+        <label>Aspect <select data-output-field="aspect">
+          ${['16:9','4:3','9:16','1:1','custom'].map(x=>`<option value="${x}" ${p.aspect===x?'selected':''}>${x}</option>`).join('')}
+        </select></label>
+      </div>
+      <label>Transport <select data-output-field="transport">
+        ${['http','ndi','srt','rtmp','webrtc','hls','other'].map(x=>`<option value="${x}" ${p.transport===x?'selected':''}>${x.toUpperCase()}</option>`).join('')}
+      </select></label>
+      <label>URL / destination <input data-output-field="url" value="${String(p.url||'').replace(/&/g,'&amp;').replace(/"/g,'&quot;')}" placeholder="/output/live, srt://, rtmp://, NDI name..."></label>
+      <div class="outputProfileUrl" title="${absoluteOutputUrl(p.url)}">${absoluteOutputUrl(p.url) || 'No URL configured'}</div>
+      <label>Notes <textarea data-output-field="notes">${String(p.notes||'').replace(/&/g,'&amp;').replace(/</g,'&lt;')}</textarea></label>
+      <div class="outputProfileActions">
+        <button class="outline" data-output-action="open" type="button">Open</button>
+        <button class="outline" data-output-action="copy" type="button">Copy URL</button>
+      </div>`;
+    card.querySelectorAll('[data-output-field]').forEach(input => input.addEventListener('input', readOutputProfilesFromDom));
+    card.querySelectorAll('select,[type="checkbox"]').forEach(input => input.addEventListener('change', readOutputProfilesFromDom));
+    const openBtn = card.querySelector('[data-output-action="open"]');
+    const copyBtn = card.querySelector('[data-output-action="copy"]');
+    openBtn.onclick = () => { const url = absoluteOutputUrl((outputSettings[key]||{}).url); if(url && /^https?:\/\//i.test(url)) window.open(url, '_blank', 'noopener'); else alert('This profile is not a browser URL. Copy it to your encoder/tool.'); };
+    copyBtn.onclick = async () => { const url = absoluteOutputUrl((outputSettings[key]||{}).url); await navigator.clipboard.writeText(url); const old=copyBtn.textContent; copyBtn.textContent='Copied'; setTimeout(()=>copyBtn.textContent=old,1000); };
+    grid.appendChild(card);
+  });
+}
+function readOutputProfilesFromDom(){
+  const next = { ...(outputSettings || {}) };
+  qsa('.outputProfileCard').forEach(card => {
+    const key = card.dataset.outputKey;
+    next[key] = next[key] || {};
+    card.querySelectorAll('[data-output-field]').forEach(input => {
+      const field = input.dataset.outputField;
+      next[key][field] = input.type === 'checkbox' ? input.checked : input.value;
+    });
+  });
+  outputSettings = next;
+  qsa('.outputProfileCard').forEach(card => {
+    const key=card.dataset.outputKey; const p=outputSettings[key]||{};
+    const led=card.querySelector('.led'); if(led) led.className='led '+(p.enabled?'green':'orange');
+    const urlBox=card.querySelector('.outputProfileUrl'); if(urlBox){ urlBox.textContent=absoluteOutputUrl(p.url)||'No URL configured'; urlBox.title=absoluteOutputUrl(p.url); }
+  });
+}
+async function loadOutputSettings(){
+  const r = await api('/api/output-settings');
+  if(r.ok) outputSettings = { ...DEFAULT_OUTPUT_PROFILES, ...(r.settings || {}) };
+  renderOutputProfiles();
+}
+async function saveOutputSettings(){
+  readOutputProfilesFromDom();
+  const r = await api('/api/output-settings', { method:'POST', body:JSON.stringify({ settings:outputSettings }) });
+  if(r.ok){ outputSettings = { ...DEFAULT_OUTPUT_PROFILES, ...(r.settings || {}) }; renderOutputProfiles(); setTwoStepHint('Output profiles saved. Renderer layout was not changed.'); }
+}
+async function resetOutputSettings(){
+  if(!confirm('Restore default output profiles?')) return;
+  const r = await api('/api/output-settings/reset', { method:'POST', body:'{}' });
+  if(r.ok){ outputSettings = { ...DEFAULT_OUTPUT_PROFILES, ...(r.settings || {}) }; renderOutputProfiles(); }
+}
+function setupOutputManager(){
+  qs('#outputSave') && (qs('#outputSave').onclick = saveOutputSettings);
+  qs('#outputReset') && (qs('#outputReset').onclick = resetOutputSettings);
+  qs('#outputRefresh') && (qs('#outputRefresh').onclick = loadOutputSettings);
+  loadOutputSettings();
+}
+
 async function clearErrorList(){ await api('/api/error-log/clear',{method:'POST',body:'{}'}); refreshErrors(); }
 window.addEventListener('DOMContentLoaded', () => {
   setupWorkflowDesigner();
+  setupOutputManager();
   loadUiSettings();
   loadGraphicsPresets();
   setupShortcutKeys();
@@ -949,7 +1302,7 @@ window.addEventListener('DOMContentLoaded', () => {
   qs('#clearErrors') && (qs('#clearErrors').onclick=clearErrorList);
   qs('#saveShortcuts') && (qs('#saveShortcuts').onclick=saveUiSettings);
   qs('#resetShortcuts') && (qs('#resetShortcuts').onclick=async()=>{ uiSettings.shortcuts={...WORKFLOW_DEFAULT_SHORTCUTS}; renderShortcuts(); await saveUiSettings(); });
-  setInterval(refreshHealth, 30000);
+  setInterval(refreshHealth, 5000);
 });
 window.addEventListener('DOMContentLoaded', () => {
   qsa('.nav[data-target]').forEach(btn => btn.addEventListener('click', () => {
@@ -965,3 +1318,182 @@ qs('#cutMainPreview') && (qs('#cutMainPreview').onclick = () => clearMainGraphic
 qs('#cutMainProgram') && (qs('#cutMainProgram').onclick = () => clearMainGraphic('program'));
 qs('#cutMainBoth') && (qs('#cutMainBoth').onclick = () => clearMainGraphic('both'));
 qsa('.mainTypeCutBtn').forEach(btn => btn.onclick = () => clearMainGraphicType(btn.dataset.cutType, btn.dataset.cutTarget || 'program'));
+
+// Phase 9 - Broadcast Engine
+const DEFAULT_BROADCAST_ENGINE_CONFIG = {
+  ffmpegPath: 'ffmpeg', inputUrl: 'http://app1:3000/output/live', incoming:{ protocol:'rtmp', url:'rtmp://mediamtx:1935/live', mediamtxPath:'live', enabled:true, overlayEnabled:true, notes:'' }, width: 1920, height: 1080, frameRate: 50, videoBitrate: '6000k', audioBitrate: '160k',
+  outputs: {
+    ndi: { enabled:false, label:'NDI Program', inputUrl:'', destination:'RGE PROGRAM', extraArgs:'' },
+    srt: { enabled:false, label:'SRT Program', inputUrl:'', destination:'srt://127.0.0.1:9999?mode=caller&latency=120000', extraArgs:'' },
+    youtube_graphics_primary: { enabled:false, label:'Graphics Only → YouTube PRIMARY', inputUrl:'http://app1:3000/output/live', destination:'rtmp://a.rtmp.youtube.com/live2/PRIMARY_STREAM_KEY', extraArgs:'' },
+    youtube_graphics_backup: { enabled:false, label:'Graphics Only → YouTube BACKUP', inputUrl:'http://app1:3000/output/live', destination:'rtmp://b.rtmp.youtube.com/live2/BACKUP_STREAM_KEY', extraArgs:'' },
+    youtube: { enabled:false, label:'Graphics only → YouTube RTMP (legacy)', inputUrl:'http://app1:3000/output/live', destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    facebook: { enabled:false, label:'Facebook RTMP', inputUrl:'', destination:'rtmps://live-api-s.facebook.com:443/rtmp/STREAM_KEY', extraArgs:'' },
+    twitch: { enabled:false, label:'Twitch RTMP', inputUrl:'', destination:'rtmp://live.twitch.tv/app/STREAM_KEY', extraArgs:'' },
+    mediamtx_graphics: { enabled:false, label:'Publish graphics-only to MediaMTX', inputUrl:'http://app1:3000/output/live', destination:'rtmp://mediamtx:1935/rge_graphics', extraArgs:'' },
+    youtube_overlay_primary: { enabled:false, label:'MAIN: Incoming stream + RGE graphics → YouTube PRIMARY', inputUrl:'rtmp://mediamtx:1935/live', destination:'rtmp://a.rtmp.youtube.com/live2/PRIMARY_STREAM_KEY', extraArgs:'' },
+    youtube_overlay_backup: { enabled:false, label:'MAIN: Incoming stream + RGE graphics → YouTube BACKUP', inputUrl:'rtmp://mediamtx:1935/live', destination:'rtmp://b.rtmp.youtube.com/live2/BACKUP_STREAM_KEY', extraArgs:'' },
+    youtube_overlay: { enabled:false, label:'MAIN: MediaMTX input + RGE graphics → YouTube (legacy)', inputUrl:'rtmp://mediamtx:1935/live', destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    youtube_passthrough: { enabled:false, label:'MediaMTX input only → YouTube', inputUrl:'rtmp://mediamtx:1935/live', destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    recorder: { enabled:false, label:'Local MP4 Recorder', inputUrl:'', destination:'recordings/rge-program.mp4', extraArgs:'' }
+  }
+};
+const BROADCAST_OUTPUT_ORDER = ['youtube_overlay_primary','youtube_overlay_backup','youtube_graphics_primary','youtube_graphics_backup','youtube_overlay','youtube_passthrough','mediamtx_graphics','ndi','srt','youtube','facebook','twitch','recorder'];
+let broadcastEngine = JSON.parse(JSON.stringify(DEFAULT_BROADCAST_ENGINE_CONFIG));
+let broadcastStatus = {};
+function mergeBroadcastEngine(config){
+  const base = JSON.parse(JSON.stringify(DEFAULT_BROADCAST_ENGINE_CONFIG));
+  const next = { ...base, ...(config || {}) };
+  next.incoming = { ...base.incoming, ...(((config || {}).incoming) || {}) };
+  next.outputs = { ...base.outputs, ...((config || {}).outputs || {}) };
+  BROADCAST_OUTPUT_ORDER.forEach(k => { next.outputs[k] = { ...base.outputs[k], ...(((config || {}).outputs || {})[k] || {}) }; });
+  return next;
+}
+function readBroadcastEngineFromDom(){
+  const get = id => qs('#'+id)?.value;
+  broadcastEngine.ffmpegPath = get('be_ffmpegPath') || 'ffmpeg';
+  broadcastEngine.inputUrl = get('be_inputUrl') || '';
+  broadcastEngine.width = Number(get('be_width') || 1920);
+  broadcastEngine.height = Number(get('be_height') || 1080);
+  broadcastEngine.frameRate = Number(get('be_frameRate') || 50);
+  broadcastEngine.videoBitrate = get('be_videoBitrate') || '6000k';
+  broadcastEngine.audioBitrate = get('be_audioBitrate') || '160k';
+  broadcastEngine.incoming = broadcastEngine.incoming || {};
+  broadcastEngine.incoming.protocol = get('be_incomingProtocol') || 'rtmp';
+  broadcastEngine.incoming.url = get('be_incomingUrl') || 'rtmp://mediamtx:1935/live';
+  broadcastEngine.incoming.mediamtxPath = get('be_mediamtxPath') || 'live';
+  broadcastEngine.incoming.enabled = !!qs('#be_incomingEnabled')?.checked;
+  broadcastEngine.incoming.overlayEnabled = !!qs('#be_overlayEnabled')?.checked;
+  broadcastEngine.incoming.notes = get('be_incomingNotes') || '';
+  qsa('.broadcastOutputCard').forEach(card => {
+    const key = card.dataset.broadcastKey;
+    broadcastEngine.outputs[key] = broadcastEngine.outputs[key] || {};
+    card.querySelectorAll('[data-be-field]').forEach(input => {
+      const field = input.dataset.beField;
+      broadcastEngine.outputs[key][field] = input.type === 'checkbox' ? input.checked : input.value;
+    });
+  });
+}
+function paintBroadcastEngine(){
+  const set = (id,val)=>{ const el=qs('#'+id); if(el) el.value = val ?? ''; };
+  set('be_ffmpegPath', broadcastEngine.ffmpegPath || 'ffmpeg');
+  set('be_inputUrl', broadcastEngine.inputUrl || '');
+  set('be_width', broadcastEngine.width || 1920);
+  set('be_height', broadcastEngine.height || 1080);
+  set('be_frameRate', broadcastEngine.frameRate || 50);
+  set('be_videoBitrate', broadcastEngine.videoBitrate || '6000k');
+  set('be_audioBitrate', broadcastEngine.audioBitrate || '160k');
+  set('be_incomingProtocol', broadcastEngine.incoming?.protocol || 'rtmp');
+  set('be_incomingUrl', broadcastEngine.incoming?.url || 'rtmp://mediamtx:1935/live');
+  set('be_mediamtxPath', broadcastEngine.incoming?.mediamtxPath || 'live');
+  set('be_incomingNotes', broadcastEngine.incoming?.notes || '');
+  const ie = qs('#be_incomingEnabled'); if(ie) ie.checked = !!broadcastEngine.incoming?.enabled;
+  const oe = qs('#be_overlayEnabled'); if(oe) oe.checked = broadcastEngine.incoming?.overlayEnabled !== false;
+  const grid = qs('#broadcastEngineGrid'); if(!grid) return;
+  grid.innerHTML = '';
+  BROADCAST_OUTPUT_ORDER.forEach(key => {
+    const p = broadcastEngine.outputs[key] || {};
+    const st = broadcastStatus[key] || {};
+    const running = !!st.running;
+    const card = document.createElement('div');
+    card.className = 'broadcastOutputCard';
+    card.dataset.broadcastKey = key;
+    card.innerHTML = `
+      <div class="broadcastOutputHead">
+        <strong>${escapeHtml(p.label || key)}</strong>
+        <span class="broadcastStatusPill"><span class="led ${running?'green':'orange'}"></span>${running ? 'Running PID '+(st.pid||'') : 'Stopped'}</span>
+      </div>
+      <label class="outputProfileStatus"><input data-be-field="enabled" type="checkbox" ${p.enabled?'checked':''}> Enabled in profile</label>
+      <label>Name <input data-be-field="label" value="${escapeAttr(p.label || '')}"></label>
+      <label>Input override <input data-be-field="inputUrl" value="${escapeAttr(p.inputUrl || '')}" placeholder="Leave empty to use global input"></label>
+      <label>Destination <input data-be-field="destination" value="${escapeAttr(p.destination || '')}" placeholder="NDI name, srt://, rtmp://, file path"></label>
+      <label>Extra FFmpeg Args <input data-be-field="extraArgs" value="${escapeAttr(p.extraArgs || '')}" placeholder="optional"></label>
+      <div class="broadcastOutputActions">
+        <button class="green" data-be-action="start" type="button" ${running?'disabled':''}>Start</button>
+        <button class="red" data-be-action="stop" type="button" ${running?'':'disabled'}>Stop</button>
+        <button class="outline" data-be-action="copy" type="button">Copy Destination</button>
+      </div>
+      <div class="broadcastLog">${escapeHtml((st.logs || []).join('\n') || 'No engine log yet.')}</div>`;
+    card.querySelectorAll('[data-be-field]').forEach(el => el.addEventListener('input', readBroadcastEngineFromDom));
+    card.querySelectorAll('select,[type="checkbox"]').forEach(el => el.addEventListener('change', readBroadcastEngineFromDom));
+    card.querySelector('[data-be-action="start"]').onclick = () => startBroadcastOutput(key);
+    card.querySelector('[data-be-action="stop"]').onclick = () => stopBroadcastOutput(key);
+    card.querySelector('[data-be-action="copy"]').onclick = async () => { readBroadcastEngineFromDom(); await navigator.clipboard.writeText((broadcastEngine.outputs[key]||{}).destination || ''); };
+    grid.appendChild(card);
+  });
+}
+function escapeHtml(s){ return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+function escapeAttr(s){ return escapeHtml(s).replace(/"/g,'&quot;'); }
+async function loadBroadcastEngine(){
+  const r = await api('/api/broadcast-engine');
+  if(r.ok){ broadcastEngine = mergeBroadcastEngine(r.config); broadcastStatus = r.status || {}; paintBroadcastEngine(); }
+}
+async function saveBroadcastEngine(){
+  readBroadcastEngineFromDom();
+  const r = await api('/api/broadcast-engine', { method:'POST', body: JSON.stringify({ config: broadcastEngine }) });
+  if(r.ok){ broadcastEngine = mergeBroadcastEngine(r.config); broadcastStatus = r.status || {}; paintBroadcastEngine(); setTwoStepHint('Broadcast Engine config saved.'); }
+}
+async function startBroadcastOutput(key){
+  readBroadcastEngineFromDom();
+  await api('/api/broadcast-engine', { method:'POST', body: JSON.stringify({ config: broadcastEngine }) });
+  const r = await api('/api/broadcast-engine/start/'+encodeURIComponent(key), { method:'POST', body:'{}' });
+  if(!r.ok) alert(r.error || 'Could not start output');
+  broadcastStatus = r.status || broadcastStatus; paintBroadcastEngine(); setTimeout(loadBroadcastEngine, 900);
+}
+async function stopBroadcastOutput(key){
+  const r = await api('/api/broadcast-engine/stop/'+encodeURIComponent(key), { method:'POST', body:'{}' });
+  broadcastStatus = r.status || broadcastStatus; paintBroadcastEngine(); setTimeout(loadBroadcastEngine, 400);
+}
+async function stopAllBroadcastOutputs(){
+  const r = await api('/api/broadcast-engine/stop-all', { method:'POST', body:'{}' });
+  broadcastStatus = r.status || broadcastStatus; paintBroadcastEngine();
+}
+async function startYouTubePair(mode){
+  readBroadcastEngineFromDom();
+  await api('/api/broadcast-engine', { method:'POST', body: JSON.stringify({ config: broadcastEngine }) });
+  const r = await api('/api/broadcast-engine/start-youtube/'+encodeURIComponent(mode), { method:'POST', body:'{}' });
+  if(!r.ok) alert(r.error || 'Failed to start YouTube pair');
+  broadcastStatus = r.status || broadcastStatus; paintBroadcastEngine(); setTimeout(loadBroadcastEngine, 900);
+}
+
+function setIncomingUrl(url, protocol='rtmp') {
+  broadcastEngine.incoming = broadcastEngine.incoming || {};
+  broadcastEngine.incoming.url = url;
+  broadcastEngine.incoming.protocol = protocol;
+  if (qs('#be_incomingUrl')) qs('#be_incomingUrl').value = url;
+  if (qs('#be_incomingProtocol')) qs('#be_incomingProtocol').value = protocol;
+  readBroadcastEngineFromDom();
+}
+async function applyIncomingToOverlayOutputs(){
+  readBroadcastEngineFromDom();
+  const incoming = broadcastEngine.incoming?.url || 'rtmp://mediamtx:1935/live';
+  ['youtube_overlay_primary','youtube_overlay_backup','youtube_overlay','youtube_passthrough'].forEach(k => {
+    broadcastEngine.outputs[k] = broadcastEngine.outputs[k] || {};
+    broadcastEngine.outputs[k].inputUrl = incoming;
+  });
+  const r = await api('/api/broadcast-engine/apply-incoming', { method:'POST', body: JSON.stringify({ config: broadcastEngine }) });
+  if(r.ok){ broadcastEngine = mergeBroadcastEngine(r.config); broadcastStatus = r.status || {}; paintBroadcastEngine(); setTwoStepHint('Incoming stream applied to overlay outputs.'); }
+  else alert(r.error || 'Could not apply incoming stream');
+}
+function openIncomingPreview(){
+  readBroadcastEngineFromDom();
+  const path = (broadcastEngine.incoming?.mediamtxPath || 'live').replace(/[^a-zA-Z0-9_-]/g,'') || 'live';
+  window.open(`http://${location.hostname}:8888/${path}/`, '_blank');
+}
+
+function setupBroadcastEngine(){
+  if(!qs('#broadcastEngineCard')) return;
+  qs('#beSave') && (qs('#beSave').onclick = saveBroadcastEngine);
+  qs('#beRefresh') && (qs('#beRefresh').onclick = loadBroadcastEngine);
+  qs('#beStopAll') && (qs('#beStopAll').onclick = stopAllBroadcastOutputs);
+  qs('#beStartYoutubeMainPair') && (qs('#beStartYoutubeMainPair').onclick = () => startYouTubePair('main'));
+  qs('#beStartYoutubeGraphicsPair') && (qs('#beStartYoutubeGraphicsPair').onclick = () => startYouTubePair('graphics'));
+  qs('#beUseIncomingForOverlay') && (qs('#beUseIncomingForOverlay').onclick = applyIncomingToOverlayOutputs);
+  qs('#beSetRtmpLive') && (qs('#beSetRtmpLive').onclick = () => setIncomingUrl('rtmp://mediamtx:1935/live','rtmp'));
+  qs('#beSetRtspLive') && (qs('#beSetRtspLive').onclick = () => setIncomingUrl('rtsp://mediamtx:8554/live','rtsp'));
+  qs('#beSetSrtLive') && (qs('#beSetSrtLive').onclick = () => setIncomingUrl('srt://mediamtx:8890?streamid=read:live','srt'));
+  qs('#bePreviewIncoming') && (qs('#bePreviewIncoming').onclick = openIncomingPreview);
+  if (typeof socket !== 'undefined' && socket) socket.on('broadcastEngine', data => { if(data.config) broadcastEngine = mergeBroadcastEngine(data.config); if(data.status) broadcastStatus = data.status; paintBroadcastEngine(); });
+  loadBroadcastEngine();
+}
+window.addEventListener('DOMContentLoaded', setupBroadcastEngine);

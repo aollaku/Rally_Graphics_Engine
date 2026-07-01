@@ -68,11 +68,19 @@ function applyGraphicsSettings(settings={}, graphicType='global'){
   const root = document.documentElement;
   const n = (v, def) => Number.isFinite(Number(v)) ? Number(v) : def;
   const pct = v => Math.max(0, Math.min(100, n(v,100))) / 100;
-  root.style.setProperty('--gfx-scale', String(n(effectiveSettings.scale, 1)));
-  root.style.setProperty('--gfx-x', n(effectiveSettings.x, 0) + 'px');
-  root.style.setProperty('--gfx-y', n(effectiveSettings.y, 0) + 'px');
-  root.style.setProperty('--gfx-width', n(effectiveSettings.width, 1920) + 'px');
-  root.style.setProperty('--gfx-height', n(effectiveSettings.height, 1080) + 'px');
+
+  // IMPORTANT: the main rally graphic must always fill the output viewport.
+  // Older Graphics Settings / Designer experiments stored width=1920, height=1080,
+  // x/y and scale values. Applying those directly makes the graphic crop or shift in
+  // Safari, controller monitor, preview and live output. Keep the programme graphic
+  // fixed to the original responsive renderer; use the settings only for safe look
+  // controls and for clock/bug layers via applyDesignerScopeToLayer().
+  root.style.setProperty('--gfx-scale', '1');
+  root.style.setProperty('--gfx-x', '0px');
+  root.style.setProperty('--gfx-y', '0px');
+  root.style.setProperty('--gfx-width', '100%');
+  root.style.setProperty('--gfx-height', '100%');
+
   root.style.setProperty('--gfx-opacity', String(pct(effectiveSettings.opacity)));
   root.style.setProperty('--gfx-bg-opacity', String(pct(effectiveSettings.backgroundOpacity)));
   root.style.setProperty('--gfx-border-opacity', String(pct(effectiveSettings.borderOpacity)));
@@ -83,6 +91,9 @@ function applyGraphicsSettings(settings={}, graphicType='global'){
   const speed = Math.max(0.1, n(effectiveSettings.animationSpeed, 1));
   const duration = Math.max(0, n(effectiveSettings.animationDuration, 280)) / speed;
   root.style.setProperty('--gfx-anim-duration', duration + 'ms');
+  root.style.setProperty('--gfx-animation-type', effectiveSettings.animationType || 'fade');
+  root.style.setProperty('--gfx-out-animation-type', effectiveSettings.outAnimationType || 'fade');
+  root.style.setProperty('--gfx-row-stagger', Math.max(0, n(effectiveSettings.rowStagger, 0)) + 'ms');
   root.style.setProperty('--gfx-easing', effectiveSettings.easing || 'ease-out');
   root.style.setProperty('--gfx-radius', n(effectiveSettings.radius, 0) + 'px');
   const active = document.getElementById(activeLayerId);
@@ -102,14 +113,15 @@ function applySceneLayers(scene={}){
   const pct = (v, def=100) => String(Math.max(0, Math.min(100, Number(v ?? def))) / 100);
   // Bug text, Logo and Clock visibility is controlled ONLY by the controller layer buttons.
   // The settings panel only stores content/style and never auto-shows these layers.
+  const activeLogoUrl = (scene?.logoUrls && scene.logoUrls[OUTPUT_MODE]) || bugLayer.logoUrl || '';
   const showBugText = !!visibility.bug && !!bugLayer.text;
-  const showLogo = !!visibility.logo && !!bugLayer.logoUrl;
+  const showLogo = !!visibility.logo && !!activeLogoUrl;
   bug.style.display = (showBugText || showLogo) ? 'flex' : 'none';
   bug.classList.toggle('logo-only', showLogo && !showBugText);
   bug.style.fontSize = `${Number(bugLayer.fontSize || 28)}px`;
   bug.style.backgroundColor = showBugText ? `rgba(0,0,0,${pct(bugLayer.backgroundOpacity,72)})` : 'transparent';
   applyDesignerScopeToLayer(bug, 'bug', { x: bugLayer.x || 0, y: bugLayer.y || 0, opacity: bugLayer.opacity ?? 100, radius: 10 });
-  const logoHtml = showLogo ? `<img class="scene-bug-logo" src="${String(bugLayer.logoUrl).replace(/"/g,'&quot;')}" style="width:${Number(bugLayer.logoWidth || 120)}px;opacity:${pct(bugLayer.logoOpacity)};background:transparent">` : '';
+  const logoHtml = showLogo ? `<img class="scene-bug-logo" src="${String(activeLogoUrl).replace(/"/g,'&quot;')}" style="width:${Number(bugLayer.logoWidth || 120)}px;opacity:${pct(bugLayer.logoOpacity)};background:transparent">` : '';
   const textHtml = (showBugText && bugLayer.text) ? `<span class="scene-bug-text">${String(bugLayer.text).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</span>` : '';
   bug.innerHTML = `${logoHtml}${textHtml}`;
   let clock = document.getElementById('sceneClock');
@@ -143,15 +155,60 @@ function animationMs(){
 function easing(){
   return getComputedStyle(document.documentElement).getPropertyValue('--gfx-easing').trim() || 'ease-out';
 }
+function cssVar(name, fallback=''){
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+function animationType(kind='in'){
+  return cssVar(kind === 'out' ? '--gfx-out-animation-type' : '--gfx-animation-type', 'fade');
+}
+function baseTransform(){
+  return `translate(var(--gfx-x),var(--gfx-y)) scale(var(--gfx-scale)) translateZ(0)`;
+}
+function transformFor(type, dir='in'){
+  const base = baseTransform();
+  const sign = dir === 'out' ? 1 : -1;
+  if (type === 'slide-left') return `translate(calc(var(--gfx-x) + ${sign * 90}px), var(--gfx-y)) scale(var(--gfx-scale)) translateZ(0)`;
+  if (type === 'slide-right') return `translate(calc(var(--gfx-x) + ${sign * -90}px), var(--gfx-y)) scale(var(--gfx-scale)) translateZ(0)`;
+  if (type === 'slide-up') return `translate(var(--gfx-x), calc(var(--gfx-y) + ${sign * 70}px)) scale(var(--gfx-scale)) translateZ(0)`;
+  if (type === 'slide-down') return `translate(var(--gfx-x), calc(var(--gfx-y) + ${sign * -70}px)) scale(var(--gfx-scale)) translateZ(0)`;
+  if (type === 'zoom' || type === 'grow') return `translate(var(--gfx-x),var(--gfx-y)) scale(calc(var(--gfx-scale) * ${dir === 'out' ? 1.06 : 0.94})) translateZ(0)`;
+  if (type === 'shrink') return `translate(var(--gfx-x),var(--gfx-y)) scale(calc(var(--gfx-scale) * 0.88)) translateZ(0)`;
+  return base;
+}
+function applyRowStagger(layer){
+  const stagger = Number.parseFloat(cssVar('--gfx-row-stagger', '0')) || 0;
+  const rows = layer.querySelectorAll('.template-row, .compact-row');
+  rows.forEach((row, i) => {
+    row.style.animationDelay = stagger > 0 ? `${i * stagger}ms` : '';
+  });
+}
 function hideAllGraphics(){
   clearSwapTimer();
+  const ms = animationMs();
+  const ease = easing();
+  const outType = animationType('out');
   for (const layer of allLayers()) {
     layer.getAnimations?.().forEach(a => a.cancel());
-    layer.className = 'gfx gfx-layer gfx-inactive hidden';
-    layer.innerHTML = '';
-    layer.style.opacity = '0';
-    layer.style.visibility = 'hidden';
     layer.style.transition = 'none';
+    if (layer.classList.contains('gfx-active') && layer.innerHTML && ms > 0 && outType !== 'none') {
+      layer.style.visibility = 'visible';
+      layer.animate([
+        { opacity: getComputedStyle(layer).opacity || 'var(--gfx-opacity)', transform: baseTransform() },
+        { opacity: 0, transform: transformFor(outType, 'out') }
+      ], { duration: ms, easing: ease, fill: 'forwards' }).onfinish = () => {
+        layer.className = 'gfx gfx-layer gfx-inactive hidden';
+        layer.innerHTML = '';
+        layer.style.opacity = '0';
+        layer.style.visibility = 'hidden';
+        layer.style.transform = baseTransform();
+      };
+    } else {
+      layer.className = 'gfx gfx-layer gfx-inactive hidden';
+      layer.innerHTML = '';
+      layer.style.opacity = '0';
+      layer.style.visibility = 'hidden';
+      layer.style.transform = baseTransform();
+    }
   }
   lastDisplayedKey = '';
   pendingRenderKey = '';
@@ -160,11 +217,9 @@ function takePreparedGraphic(nextLayer, renderKey){
   clearSwapTimer();
   const ms = animationMs();
   const ease = easing();
+  const inType = animationType('in');
   const oldLayer = activeLayer();
 
-  // Do not leave the old layer underneath the new one during the fade.
-  // With opacity/transparent graphics, two layers overlap and when the old layer is removed
-  // it looks exactly like a random flicker at the end of the in-animation.
   for (const layer of allLayers()) {
     layer.getAnimations?.().forEach(a => a.cancel());
     layer.style.transition = 'none';
@@ -176,12 +231,13 @@ function takePreparedGraphic(nextLayer, renderKey){
     }
   }
 
+  applyRowStagger(nextLayer);
   nextLayer.className = 'gfx gfx-layer gfx-taking';
   nextLayer.style.visibility = 'visible';
   nextLayer.style.opacity = '0';
   nextLayer.style.transition = 'none';
+  nextLayer.style.transform = baseTransform();
 
-  // Force style commit before changing opacity, otherwise some browsers skip or replay the transition.
   void nextLayer.offsetHeight;
 
   requestAnimationFrame(() => {
@@ -189,14 +245,17 @@ function takePreparedGraphic(nextLayer, renderKey){
     activeLayerId = nextLayer.id;
     lastDisplayedKey = renderKey;
     pendingRenderKey = '';
-    nextLayer.style.transition = ms > 0 ? `opacity ${ms}ms ${ease}` : 'none';
-    nextLayer.style.opacity = 'var(--gfx-opacity)';
-
-    // Important: no end-of-animation class/transition cleanup on the visible layer.
-    // That cleanup was causing the one-frame hide/show flicker on some graphics.
-    if (oldLayer && oldLayer !== nextLayer) {
-      oldLayer.innerHTML = '';
+    if (ms > 0 && inType !== 'none') {
+      nextLayer.animate([
+        { opacity: 0, transform: transformFor(inType, 'in') },
+        { opacity: cssVar('--gfx-opacity', '1'), transform: baseTransform() }
+      ], { duration: ms, easing: ease, fill: 'forwards' });
+    } else {
+      nextLayer.style.opacity = 'var(--gfx-opacity)';
+      nextLayer.style.transform = baseTransform();
     }
+
+    if (oldLayer && oldLayer !== nextLayer) { oldLayer.innerHTML = ''; }
   });
 }
 async function refreshGraphicsSettings(){

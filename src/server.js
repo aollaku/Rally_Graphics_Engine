@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
@@ -54,12 +55,226 @@ const DEFAULT_GRAPHICS_SETTINGS = {
   contrast: 100,
   animationSpeed: 1,
   animationDuration: 280,
+  animationType: 'fade',
+  outAnimationType: 'fade',
+  rowStagger: 0,
   easing: 'ease-out',
   radius: 0,
   perGraphic: {},
   updatedAt: new Date().toISOString()
 };
 
+
+
+const DEFAULT_OUTPUT_SETTINGS = {
+  program: { enabled:true, label:'Program', resolution:'1920x1080', aspect:'16:9', transport:'http', url:'/output/live', notes:'Main live graphics output for encoder or mixer browser source.' },
+  preview: { enabled:true, label:'Preview', resolution:'1920x1080', aspect:'16:9', transport:'http', url:'/preview/live', notes:'Safe preview output for checking before TAKE.' },
+  ndi: { enabled:false, label:'NDI', resolution:'1920x1080', aspect:'16:9', transport:'ndi', url:'', notes:'Use the Program URL with an external browser-to-NDI tool.' },
+  srt: { enabled:false, label:'SRT', resolution:'1920x1080', aspect:'16:9', transport:'srt', url:'', notes:'Reserved profile for SRT output workflow.' },
+  youtube: { enabled:false, label:'YouTube', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store the destination/encoder note here. Stream keys should be kept outside screenshots.' },
+  facebook: { enabled:false, label:'Facebook', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store the destination/encoder note here. Stream keys should be kept private.' },
+  twitch: { enabled:false, label:'Twitch', resolution:'1920x1080', aspect:'16:9', transport:'rtmp', url:'', notes:'Store the destination/encoder note here. Stream keys should be kept private.' },
+  social: { enabled:false, label:'Social Vertical', resolution:'1080x1920', aspect:'9:16', transport:'http', url:'/output/live?profile=social', notes:'Reference profile for future vertical/social output. Does not alter the stable 16:9 renderer yet.' },
+  updatedAt: new Date().toISOString()
+};
+
+const DEFAULT_GRAPHICS_URL = process.env.RGE_GRAPHICS_URL || 'http://127.0.0.1:3000/output/live';
+const DEFAULT_INCOMING_URL = process.env.RGE_INCOMING_URL || 'rtmp://mediamtx:1935/live';
+const FFMPEG_ENGINE_URL = (process.env.FFMPEG_ENGINE_URL || '').replace(/\/$/, '');
+
+const DEFAULT_BROADCAST_ENGINE = {
+  ffmpegPath: process.env.FFMPEG_PATH || 'ffmpeg',
+  inputUrl: DEFAULT_GRAPHICS_URL,
+  incoming: { protocol:'rtmp', url: DEFAULT_INCOMING_URL, mediamtxPath:'live', enabled:true, overlayEnabled:true, notes:'Publish your camera/program feed to MediaMTX, then use it as the FFmpeg overlay input.' },
+  videoBitrate: '6000k',
+  audioBitrate: '160k',
+  frameRate: 50,
+  width: 1920,
+  height: 1080,
+  outputs: {
+    ndi: { enabled:false, label:'NDI Program', inputUrl:'', destination:'RGE PROGRAM', extraArgs:'' },
+    srt: { enabled:false, label:'SRT Program', inputUrl:'', destination:'srt://127.0.0.1:9999?mode=caller&latency=120000', extraArgs:'' },
+    youtube_graphics_primary: { enabled:false, label:'Graphics Only → YouTube PRIMARY', inputUrl: DEFAULT_GRAPHICS_URL, destination:'rtmp://a.rtmp.youtube.com/live2/PRIMARY_STREAM_KEY', extraArgs:'' },
+    youtube_graphics_backup: { enabled:false, label:'Graphics Only → YouTube BACKUP', inputUrl: DEFAULT_GRAPHICS_URL, destination:'rtmp://b.rtmp.youtube.com/live2/BACKUP_STREAM_KEY', extraArgs:'' },
+    youtube: { enabled:false, label:'Graphics only → YouTube RTMP (legacy)', inputUrl: DEFAULT_GRAPHICS_URL, destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    facebook: { enabled:false, label:'Facebook RTMP', inputUrl:'', destination:'rtmps://live-api-s.facebook.com:443/rtmp/STREAM_KEY', extraArgs:'' },
+    twitch: { enabled:false, label:'Twitch RTMP', inputUrl:'', destination:'rtmp://live.twitch.tv/app/STREAM_KEY', extraArgs:'' },
+    mediamtx_graphics: { enabled:false, label:'Publish graphics-only to MediaMTX', inputUrl: DEFAULT_GRAPHICS_URL, destination:'rtmp://mediamtx:1935/rge_graphics', extraArgs:'' },
+    youtube_overlay_primary: { enabled:false, label:'MAIN: Incoming stream + RGE graphics → YouTube PRIMARY', inputUrl: DEFAULT_INCOMING_URL, destination:'rtmp://a.rtmp.youtube.com/live2/PRIMARY_STREAM_KEY', extraArgs:'' },
+    youtube_overlay_backup: { enabled:false, label:'MAIN: Incoming stream + RGE graphics → YouTube BACKUP', inputUrl: DEFAULT_INCOMING_URL, destination:'rtmp://b.rtmp.youtube.com/live2/BACKUP_STREAM_KEY', extraArgs:'' },
+    youtube_overlay: { enabled:false, label:'MAIN: Incoming stream + RGE graphics → YouTube (legacy)', inputUrl: DEFAULT_INCOMING_URL, destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    youtube_passthrough: { enabled:false, label:'Incoming stream only → YouTube', inputUrl: DEFAULT_INCOMING_URL, destination:'rtmp://a.rtmp.youtube.com/live2/STREAM_KEY', extraArgs:'' },
+    recorder: { enabled:false, label:'Local MP4 Recorder', inputUrl:'', destination:'recordings/rge-program.mp4', extraArgs:'' }
+  },
+  updatedAt: new Date().toISOString()
+};
+
+function normaliseBroadcastEngine(input={}){
+  const src = input || {};
+  const out = { ...DEFAULT_BROADCAST_ENGINE, ...src };
+  const num = (v,min,max,def) => { const n=Number(v); return Number.isFinite(n) ? Math.max(min, Math.min(max,n)) : def; };
+  out.ffmpegPath = String(out.ffmpegPath || 'ffmpeg').slice(0, 300);
+  out.inputUrl = String(out.inputUrl || DEFAULT_BROADCAST_ENGINE.inputUrl).slice(0, 800);
+  const incoming = (src.incoming || DEFAULT_BROADCAST_ENGINE.incoming || {});
+  out.incoming = {
+    protocol: ['rtmp','srt','rtsp','hls','udp','mediamtx','custom'].includes(incoming.protocol) ? incoming.protocol : 'rtmp',
+    url: String(incoming.url || DEFAULT_INCOMING_URL).slice(0, 800),
+    mediamtxPath: String(incoming.mediamtxPath || 'live').replace(/[^a-zA-Z0-9_\-]/g,'').slice(0,80) || 'live',
+    enabled: Boolean(incoming.enabled ?? true),
+    overlayEnabled: Boolean(incoming.overlayEnabled ?? true),
+    notes: String(incoming.notes || '').slice(0, 500)
+  };
+  out.videoBitrate = String(out.videoBitrate || '6000k').replace(/[^0-9kKmM]/g,'').slice(0,20) || '6000k';
+  out.audioBitrate = String(out.audioBitrate || '160k').replace(/[^0-9kKmM]/g,'').slice(0,20) || '160k';
+  out.frameRate = num(out.frameRate, 1, 120, 50);
+  out.width = num(out.width, 320, 7680, 1920);
+  out.height = num(out.height, 240, 4320, 1080);
+  out.outputs = {};
+  for (const key of Object.keys(DEFAULT_BROADCAST_ENGINE.outputs)) {
+    const incoming = ((src.outputs || {})[key]) || {};
+    out.outputs[key] = {
+      ...DEFAULT_BROADCAST_ENGINE.outputs[key],
+      ...incoming,
+      enabled: Boolean(incoming.enabled ?? DEFAULT_BROADCAST_ENGINE.outputs[key].enabled),
+      label: String(incoming.label || DEFAULT_BROADCAST_ENGINE.outputs[key].label).slice(0, 80),
+      inputUrl: String(incoming.inputUrl || '').slice(0, 800),
+      destination: String(incoming.destination || DEFAULT_BROADCAST_ENGINE.outputs[key].destination).slice(0, 1000),
+      extraArgs: String(incoming.extraArgs || '').slice(0, 1000)
+    };
+  }
+  out.updatedAt = new Date().toISOString();
+  return out;
+}
+
+const broadcastProcesses = new Map();
+const broadcastLogs = new Map();
+function logBroadcast(key, line){
+  const arr = broadcastLogs.get(key) || [];
+  arr.push(`[${new Date().toLocaleTimeString()}] ${String(line).replace(/\r?\n/g,' ').slice(0,500)}`);
+  while (arr.length > 80) arr.shift();
+  broadcastLogs.set(key, arr);
+}
+function splitArgs(str=''){
+  const out=[]; let cur=''; let quote=null;
+  for (let i=0;i<str.length;i++) { const ch=str[i];
+    if (quote) { if (ch===quote) quote=null; else cur+=ch; }
+    else if (ch==='"' || ch==="'") quote=ch;
+    else if (/\s/.test(ch)) { if(cur){ out.push(cur); cur=''; } }
+    else cur+=ch;
+  }
+  if(cur) out.push(cur); return out;
+}
+function buildFfmpegArgs(config, key){
+  const engine = normaliseBroadcastEngine(config);
+  const profile = engine.outputs[key];
+  if (!profile) throw new Error('Unknown broadcast output');
+  const input = profile.inputUrl || engine.inputUrl;
+  if (!input) throw new Error('No input URL configured');
+  const common = ['-hide_banner','-loglevel','info','-re','-i',input,'-r',String(engine.frameRate),'-s',`${engine.width}x${engine.height}`,'-c:v','libx264','-preset','veryfast','-tune','zerolatency','-b:v',engine.videoBitrate,'-pix_fmt','yuv420p','-c:a','aac','-b:a',engine.audioBitrate];
+  const extra = splitArgs(profile.extraArgs);
+  if (key === 'ndi') return [...common, ...extra, '-f','libndi_newtek', profile.destination || 'RGE PROGRAM'];
+  if (key === 'srt') return [...common, ...extra, '-f','mpegts', profile.destination];
+  if (key === 'recorder') return [...common, ...extra, '-movflags','+faststart', profile.destination];
+  return [...common, ...extra, '-f','flv', profile.destination];
+}
+
+function buildBrowserStreamCommand(config, key){
+  const engine = normaliseBroadcastEngine(config);
+  const profile = engine.outputs[key];
+  if (!profile) throw new Error('Unknown broadcast output');
+  const input = profile.inputUrl || engine.inputUrl;
+  const destination = String(profile.destination || '').trim();
+  if (!input) throw new Error('No input URL configured');
+  if (!destination || /STREAM_KEY/i.test(destination)) throw new Error('Add the full YouTube RTMP URL including your stream key before starting');
+  const script = path.join(__dirname, '..', 'scripts', 'rge-stream-browser.sh');
+  return {
+    command: '/bin/bash',
+    args: [script, input, destination, String(engine.width), String(engine.height), String(engine.frameRate), engine.videoBitrate, engine.audioBitrate, profile.extraArgs || ''],
+    display: `/bin/bash ${script} ${input} [destination hidden] ${engine.width}x${engine.height}@${engine.frameRate}`
+  };
+}
+
+function buildOverlayStreamCommand(config, key){
+  const engine = normaliseBroadcastEngine(config);
+  const profile = engine.outputs[key];
+  if (!profile) throw new Error('Unknown broadcast output');
+  const videoInput = String(profile.inputUrl || engine.incoming?.url || DEFAULT_INCOMING_URL).trim();
+  const destination = String(profile.destination || '').trim();
+  if (!videoInput) throw new Error('No MediaMTX/input stream URL configured');
+  if (!destination || /STREAM_KEY/i.test(destination)) throw new Error('Add the full YouTube RTMP URL including your stream key before starting');
+  const graphicsUrl = engine.inputUrl || DEFAULT_BROADCAST_ENGINE.inputUrl;
+  const script = path.join(__dirname, '..', 'scripts', 'rge-overlay-to-youtube.sh');
+  return {
+    command: '/bin/bash',
+    args: [script, videoInput, graphicsUrl, destination, String(engine.width), String(engine.height), String(engine.frameRate), engine.videoBitrate, engine.audioBitrate, profile.extraArgs || ''],
+    display: `/bin/bash ${script} ${videoInput} ${graphicsUrl} [destination hidden] ${engine.width}x${engine.height}@${engine.frameRate}`
+  };
+}
+
+function broadcastStatus(){
+  const out = {};
+  for (const key of Object.keys(DEFAULT_BROADCAST_ENGINE.outputs)) {
+    const p = broadcastProcesses.get(key);
+    out[key] = { running: Boolean(p && !p.killed), pid: p?.pid || null, logs: (broadcastLogs.get(key)||[]).slice(-12) };
+  }
+  return out;
+}
+
+
+async function remoteEngineRequest(method, endpoint, body){
+  if (!FFMPEG_ENGINE_URL) return null;
+  const r = await fetch(`${FFMPEG_ENGINE_URL}${endpoint}`, {
+    method,
+    headers: { 'Content-Type':'application/json' },
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await r.json().catch(()=>({ ok:false, error:'Bad response from ffmpeg-engine' }));
+  if (!r.ok || data.ok === false) throw new Error(data.error || `ffmpeg-engine ${r.status}`);
+  return data;
+}
+async function getBroadcastStatus(){
+  if (FFMPEG_ENGINE_URL) {
+    try { const data = await remoteEngineRequest('GET','/status'); if (data && data.status) return data.status; }
+    catch (e) { const s = broadcastStatus(); s.ffmpeg_engine = { running:false, pid:null, logs:[`Remote ffmpeg-engine unavailable: ${e.message}`] }; return s; }
+  }
+  return broadcastStatus();
+}
+async function startRemoteBroadcast(key, mode='single'){
+  const data = await remoteEngineRequest('POST','/start', { key, mode, config: state.broadcastEngine });
+  return data.status || {};
+}
+async function stopRemoteBroadcast(key){
+  const data = await remoteEngineRequest('POST', `/stop/${encodeURIComponent(key)}`, {});
+  return data.status || {};
+}
+async function stopAllRemoteBroadcast(){
+  const data = await remoteEngineRequest('POST', '/stop-all', {});
+  return data.status || {};
+}
+
+function normaliseOutputSettings(input={}){
+  const allowedRes = ['1920x1080','1280x720','3840x2160','1080x1920','custom'];
+  const allowedAspect = ['16:9','4:3','9:16','1:1','custom'];
+  const allowedTransport = ['http','ndi','srt','rtmp','webrtc','hls','other'];
+  const out = { ...DEFAULT_OUTPUT_SETTINGS };
+  for (const key of Object.keys(DEFAULT_OUTPUT_SETTINGS)) {
+    if (key === 'updatedAt') continue;
+    const incoming = (input && input[key]) || {};
+    out[key] = {
+      ...DEFAULT_OUTPUT_SETTINGS[key],
+      ...incoming,
+      enabled: Boolean(incoming.enabled ?? DEFAULT_OUTPUT_SETTINGS[key].enabled),
+      label: String(incoming.label || DEFAULT_OUTPUT_SETTINGS[key].label).slice(0, 50),
+      resolution: allowedRes.includes(incoming.resolution) ? incoming.resolution : DEFAULT_OUTPUT_SETTINGS[key].resolution,
+      aspect: allowedAspect.includes(incoming.aspect) ? incoming.aspect : DEFAULT_OUTPUT_SETTINGS[key].aspect,
+      transport: allowedTransport.includes(incoming.transport) ? incoming.transport : DEFAULT_OUTPUT_SETTINGS[key].transport,
+      url: String(incoming.url ?? DEFAULT_OUTPUT_SETTINGS[key].url).slice(0, 500),
+      notes: String(incoming.notes ?? DEFAULT_OUTPUT_SETTINGS[key].notes).slice(0, 500)
+    };
+  }
+  out.updatedAt = new Date().toISOString();
+  return out;
+}
 
 const DEFAULT_SCENE_STATE = {
   preview: { type: 'blank', stageId: 0, page: 1, pageSize: 10, title: '' },
@@ -80,6 +295,10 @@ const DEFAULT_SCENE_STATE = {
     { name: 'Clear Program', actions: [{ type: 'clear' }] },
     { name: 'Take Preview', actions: [{ type: 'takePreview' }] }
   ],
+  activeLogoSlot: 1,
+  activeLogoSlotPreview: 1,
+  activeLogoSlotProgram: 1,
+  logoUrls: { preview: '', program: '' },
   updatedAt: new Date().toISOString()
 };
 function normaliseGraphic(g={}){
@@ -112,6 +331,10 @@ function normaliseScene(input={}){
       program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((s.layerVisibility || {}).program || {}) }
     },
     macros: Array.isArray(s.macros) ? s.macros.slice(0, 50) : DEFAULT_SCENE_STATE.macros,
+    activeLogoSlot: Number(s.activeLogoSlot || 1),
+    activeLogoSlotPreview: Number(s.activeLogoSlotPreview || s.activeLogoSlot || 1),
+    activeLogoSlotProgram: Number(s.activeLogoSlotProgram || s.activeLogoSlot || 1),
+    logoUrls: { ...DEFAULT_SCENE_STATE.logoUrls, ...((s.logoUrls || {})) },
     updatedAt: new Date().toISOString()
   };
 }
@@ -121,6 +344,8 @@ let state = {
   scene: { ...DEFAULT_SCENE_STATE },
   graphic: { type: 'blank', stageId: 0, page: 1, pageSize: 10, title: '', updatedAt: new Date().toISOString() },
   graphicsSettings: { ...DEFAULT_GRAPHICS_SETTINGS },
+  outputSettings: { ...DEFAULT_OUTPUT_SETTINGS },
+  broadcastEngine: { ...DEFAULT_BROADCAST_ENGINE },
 };
 function normaliseGraphicsSettings(input={}){
   const s = { ...DEFAULT_GRAPHICS_SETTINGS, ...(input || {}) };
@@ -140,6 +365,9 @@ function normaliseGraphicsSettings(input={}){
     contrast: num(s.contrast, 0, 200, 100),
     animationSpeed: num(s.animationSpeed, 0.1, 5, 1),
     animationDuration: num(s.animationDuration, 0, 5000, 280),
+    animationType: ['none','fade','slide-left','slide-right','slide-up','slide-down','zoom','grow'].includes(s.animationType) ? s.animationType : 'fade',
+    outAnimationType: ['none','fade','slide-left','slide-right','slide-up','slide-down','zoom','shrink'].includes(s.outAnimationType) ? s.outAnimationType : 'fade',
+    rowStagger: num(s.rowStagger, 0, 250, 0),
     easing: ['linear','ease','ease-in','ease-out','ease-in-out','cubic-bezier(.34,1.56,.64,1)'].includes(s.easing) ? s.easing : 'ease-out',
     radius: num(s.radius, 0, 80, 0),
     perGraphic: typeof s.perGraphic === 'object' && s.perGraphic ? Object.fromEntries(Object.entries(s.perGraphic).slice(0,20).map(([k,v]) => [k, normaliseGraphicsSettings({ ...v, perGraphic: {} })])) : {},
@@ -149,6 +377,8 @@ function normaliseGraphicsSettings(input={}){
 async function loadSharedState(){
   try { state = await db.getAppState(state); } catch (err) { console.warn('Could not load shared state:', err.message); }
   state.graphicsSettings = normaliseGraphicsSettings(state.graphicsSettings);
+  state.outputSettings = normaliseOutputSettings(state.outputSettings);
+  state.broadcastEngine = normaliseBroadcastEngine(state.broadcastEngine);
   state.scene = normaliseScene(state.scene);
   return state;
 }
@@ -270,7 +500,7 @@ function listUploadedLogos(){
       const st = fs.statSync(path.join(uploadDir, f));
       return { fileName: f, url: `/uploads/logos/${f}`, size: st.size, uploadedAt: st.mtime.toISOString() };
     })
-    .sort((a,b) => String(b.uploadedAt).localeCompare(String(a.uploadedAt)));
+    .sort((a,b) => String(a.uploadedAt).localeCompare(String(b.uploadedAt))); // slot 1/2 = first two uploaded logos
 }
 app.get('/api/assets/logos', requireControl, async (req, res) => {
   try { res.json({ ok:true, logos:listUploadedLogos() }); }
@@ -503,6 +733,25 @@ app.post('/api/scene/layer-trigger', requireControl, async (req, res) => {
     const layer = String(req.body.layer || '').trim();
     const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'preview';
     if (!['bug','logo','clock'].includes(layer)) return res.status(400).json({ ok:false, error:'Unknown layer button.' });
+    if (layer === 'logo') {
+      const slot = Math.max(1, Math.min(2, Number(req.body.slot || 1)));
+      const logos = listUploadedLogos();
+      const chosen = logos[slot - 1];
+      if (!chosen) return res.status(400).json({ ok:false, error:`Logo slot ${slot} is empty. Upload at least ${slot} PNG logo(s) on the main controller page.` });
+      state.scene.layers = { ...DEFAULT_SCENE_STATE.layers, ...(state.scene.layers || {}) };
+      state.scene.layers.bug = { ...DEFAULT_SCENE_STATE.layers.bug, ...(state.scene.layers.bug || {}), logoEnabled: true };
+      state.scene.logoUrls = { ...DEFAULT_SCENE_STATE.logoUrls, ...(state.scene.logoUrls || {}) };
+      if (target === 'preview' || target === 'both') {
+        state.scene.logoUrls.preview = chosen.url;
+        state.scene.activeLogoSlotPreview = slot;
+      }
+      if (target === 'program' || target === 'both') {
+        state.scene.logoUrls.program = chosen.url;
+        state.scene.activeLogoSlotProgram = slot;
+        state.scene.layers.bug.logoUrl = chosen.url;
+      }
+      state.scene.activeLogoSlot = slot;
+    }
     state.scene.layerVisibility = {
       preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((state.scene.layerVisibility || {}).preview || {}) },
       program: { ...DEFAULT_SCENE_STATE.layerVisibility.program, ...((state.scene.layerVisibility || {}).program || {}) }
@@ -641,6 +890,7 @@ app.get('/api/config/export', requireLogin, async (req, res) => {
     exportedAt: new Date().toISOString(),
     appState: sharedState,
     graphicsSettings: sharedState.graphicsSettings || DEFAULT_GRAPHICS_SETTINGS,
+    outputSettings: sharedState.outputSettings || DEFAULT_OUTPUT_SETTINGS,
     uiSettings: sharedState.uiSettings || defaultUiSettings(),
     graphicsPresets: sharedState.graphicsPresets || [],
     database
@@ -663,6 +913,8 @@ app.post('/api/config/import', requireLogin, async (req, res) => {
       ...state,
       ...incomingState,
       graphicsSettings: normaliseGraphicsSettings(incomingGraphics),
+      outputSettings: normaliseOutputSettings(payload.outputSettings || incomingState.outputSettings || state.outputSettings),
+      broadcastEngine: normaliseBroadcastEngine(payload.broadcastEngine || incomingState.broadcastEngine || state.broadcastEngine),
       scene: normaliseScene(incomingState.scene || payload.scene || state.scene),
       uiSettings: normaliseUiSettings(payload.uiSettings || incomingState.uiSettings || state.uiSettings || {}),
       graphicsPresets: Array.isArray(payload.graphicsPresets || incomingState.graphicsPresets) ? (payload.graphicsPresets || incomingState.graphicsPresets).slice(0,100) : (state.graphicsPresets || [])
@@ -675,10 +927,132 @@ app.post('/api/config/import', requireLogin, async (req, res) => {
 
     await db.audit('import_config', { user: req.session.user.username, mode, importedDatabase: !!payload.database, usersRestored: databaseResult?.users || 0 });
     io.emit('graphicsSettings', state.graphicsSettings);
+    io.emit('outputSettings', state.outputSettings);
+    io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
     io.emit('state', state);
     res.json({ ok: true, result: { mode, stateImported: true, database: databaseResult } });
   }
   catch (err) { res.status(400).json({ ok: false, error: err.message }); }
+});
+
+
+app.get('/api/broadcast-engine', requireLogin, async (req, res) => {
+  await loadSharedState();
+  res.json({ ok:true, config: state.broadcastEngine, status: await getBroadcastStatus(), ffmpegPath: state.broadcastEngine.ffmpegPath, remoteEngine: Boolean(FFMPEG_ENGINE_URL) });
+});
+
+app.post('/api/broadcast-engine', requireControl, async (req, res) => {
+  await loadSharedState();
+  state.broadcastEngine = normaliseBroadcastEngine(req.body.config || req.body || state.broadcastEngine);
+  await saveSharedState();
+  io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
+  res.json({ ok:true, config: state.broadcastEngine, status: await getBroadcastStatus() });
+});
+
+app.post('/api/broadcast-engine/apply-incoming', requireControl, async (req, res) => {
+  await loadSharedState();
+  state.broadcastEngine = normaliseBroadcastEngine(req.body.config || state.broadcastEngine);
+  const incomingUrl = String(state.broadcastEngine.incoming?.url || DEFAULT_INCOMING_URL).trim();
+  for (const key of ['youtube_overlay_primary','youtube_overlay_backup','youtube_overlay','youtube_passthrough']) {
+    if (state.broadcastEngine.outputs[key]) state.broadcastEngine.outputs[key].inputUrl = incomingUrl;
+  }
+  await saveSharedState();
+  const status = await getBroadcastStatus();
+  io.emit('broadcastEngine', { config: state.broadcastEngine, status });
+  res.json({ ok:true, config: state.broadcastEngine, status });
+});
+
+app.post('/api/broadcast-engine/start/:key', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    const key = String(req.params.key || '');
+    if (FFMPEG_ENGINE_URL) {
+      const status = await startRemoteBroadcast(key, 'single');
+      io.emit('broadcastEngine', { config: state.broadcastEngine, status });
+      return res.json({ ok:true, remote:true, status });
+    }
+    if (broadcastProcesses.has(key)) return res.json({ ok:true, message:'Already running', status: broadcastStatus() });
+    let command = state.broadcastEngine.ffmpegPath;
+    let args = buildFfmpegArgs(state.broadcastEngine, key);
+    let displayCommand = `${command} ${args.join(' ')}`;
+    if (['youtube_overlay','youtube_overlay_primary','youtube_overlay_backup'].includes(key)) {
+      const overlayCmd = buildOverlayStreamCommand(state.broadcastEngine, key);
+      command = overlayCmd.command;
+      args = overlayCmd.args;
+      displayCommand = overlayCmd.display;
+    } else if (['youtube','youtube_graphics_primary','youtube_graphics_backup','facebook','twitch','mediamtx_graphics'].includes(key)) {
+      const browserCmd = buildBrowserStreamCommand(state.broadcastEngine, key);
+      command = browserCmd.command;
+      args = browserCmd.args;
+      displayCommand = browserCmd.display;
+    }
+    logBroadcast(key, `Starting: ${displayCommand}`);
+    const child = spawn(command, args, { cwd: path.join(__dirname, '..'), stdio: ['ignore','pipe','pipe'], env: { ...process.env } });
+    broadcastProcesses.set(key, child);
+    child.stdout.on('data', d => logBroadcast(key, d.toString()));
+    child.stderr.on('data', d => logBroadcast(key, d.toString()));
+    child.on('error', err => { logBroadcast(key, `ERROR: ${err.message}`); recordError('broadcast', `${key}: ${err.message}`, 'red'); broadcastProcesses.delete(key); io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() }); });
+    child.on('exit', (code, signal) => { logBroadcast(key, `Stopped with code ${code ?? ''} ${signal ?? ''}`); broadcastProcesses.delete(key); io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() }); });
+    io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
+    res.json({ ok:true, pid: child.pid, args, status: broadcastStatus() });
+  } catch (err) { recordError('broadcast', err.message, 'red'); res.status(400).json({ ok:false, error: humanError(err.message) }); }
+});
+
+
+app.post('/api/broadcast-engine/start-youtube/:mode', requireControl, async (req, res) => {
+  try {
+    const mode = String(req.params.mode || '').toLowerCase();
+    const keys = mode === 'graphics'
+      ? ['youtube_graphics_primary','youtube_graphics_backup']
+      : ['youtube_overlay_primary','youtube_overlay_backup'];
+    if (FFMPEG_ENGINE_URL) {
+      const status = await startRemoteBroadcast(mode === 'graphics' ? 'youtube_graphics_pair' : 'youtube_overlay_pair', mode);
+      io.emit('broadcastEngine', { config: state.broadcastEngine, status });
+      return res.json({ ok:true, remote:true, status });
+    }
+    const started = [];
+    for (const key of keys) {
+      if (broadcastProcesses.has(key)) { started.push({ key, alreadyRunning:true }); continue; }
+      let cmd;
+      if (mode === 'graphics') cmd = buildBrowserStreamCommand(state.broadcastEngine, key);
+      else cmd = buildOverlayStreamCommand(state.broadcastEngine, key);
+      logBroadcast(key, `Starting YouTube ${mode} redundant output: ${cmd.display}`);
+      const child = spawn(cmd.command, cmd.args, { cwd: path.join(__dirname, '..'), env: { ...process.env, FFMPEG_PATH: state.broadcastEngine.ffmpegPath || 'ffmpeg' } });
+      broadcastProcesses.set(key, child);
+      child.stdout.on('data', d => logBroadcast(key, d.toString()));
+      child.stderr.on('data', d => logBroadcast(key, d.toString()));
+      child.on('error', err => { logBroadcast(key, `ERROR: ${err.message}`); recordError('broadcast', `${key}: ${err.message}`, 'red'); broadcastProcesses.delete(key); io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() }); });
+      child.on('exit', (code, signal) => { logBroadcast(key, `Stopped with code ${code ?? ''} ${signal ?? ''}`); broadcastProcesses.delete(key); io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() }); });
+      started.push({ key, pid: child.pid });
+    }
+    io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
+    res.json({ ok:true, started, status:broadcastStatus() });
+  } catch (e) { res.status(400).json({ ok:false, error:e.message }); }
+});
+
+app.post('/api/broadcast-engine/stop/:key', requireControl, async (req, res) => {
+  const key = String(req.params.key || '');
+  if (FFMPEG_ENGINE_URL) {
+    const status = await stopRemoteBroadcast(key);
+    io.emit('broadcastEngine', { config: state.broadcastEngine, status });
+    return res.json({ ok:true, remote:true, status });
+  }
+  const child = broadcastProcesses.get(key);
+  if (child) { logBroadcast(key, 'Stopping by controller request'); child.kill('SIGTERM'); setTimeout(()=>{ if (broadcastProcesses.has(key)) { try { child.kill('SIGKILL'); } catch(_){} } }, 3000); }
+  broadcastProcesses.delete(key);
+  io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
+  res.json({ ok:true, status: broadcastStatus() });
+});
+
+app.post('/api/broadcast-engine/stop-all', requireControl, async (req, res) => {
+  if (FFMPEG_ENGINE_URL) {
+    const status = await stopAllRemoteBroadcast();
+    io.emit('broadcastEngine', { config: state.broadcastEngine, status });
+    return res.json({ ok:true, remote:true, status });
+  }
+  for (const [key, child] of broadcastProcesses.entries()) { logBroadcast(key, 'Stopping by controller request'); try { child.kill('SIGTERM'); } catch(_){} broadcastProcesses.delete(key); }
+  io.emit('broadcastEngine', { config: state.broadcastEngine, status: broadcastStatus() });
+  res.json({ ok:true, status: broadcastStatus() });
 });
 
 app.get('/api/rundown', requireLogin, async (req, res) => {
@@ -790,6 +1164,144 @@ app.delete('/api/graphics-presets/:name', requireLogin, async (req, res) => {
   await saveSharedState();
   res.json({ ok:true, presets: state.graphicsPresets });
 });
+
+async function httpJson(url, timeoutMs=1500){
+  return new Promise(resolve => {
+    const lib = url.startsWith('https:') ? require('https') : require('http');
+    const req = lib.get(url, { timeout: timeoutMs }, res => {
+      let data='';
+      res.on('data', d => { data += d; if(data.length > 1024*1024) req.destroy(); });
+      res.on('end', () => {
+        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, statusCode: res.statusCode, data: data ? JSON.parse(data) : {} }); }
+        catch { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, statusCode: res.statusCode, data: data.slice(0,500) }); }
+      });
+    });
+    req.on('timeout', () => { req.destroy(new Error('timeout')); });
+    req.on('error', err => resolve({ ok:false, error:err.message }));
+  });
+}
+function serviceLed(ok, configured=true){ return configured === false ? 'grey' : (ok ? 'green' : 'red'); }
+
+function uniqueList(items){
+  return [...new Set(items.filter(Boolean).map(x => String(x).replace(/\/$/, '')) )];
+}
+async function firstWorkingJson(baseUrls, path, timeoutMs=1500){
+  let last = { ok:false, error:'not checked' };
+  for (const base of uniqueList(baseUrls)) {
+    const r = await httpJson(base + path, timeoutMs);
+    if (r.ok) return { ...r, baseUrl:base, tried:baseUrls };
+    last = { ...r, baseUrl:base, tried:baseUrls };
+  }
+  return last;
+}
+async function serviceHttpStatus(name, urls, path='/healthz', timeoutMs=1000){
+  const r = await firstWorkingJson(urls, path, timeoutMs);
+  return {
+    status: r.ok ? 'green' : 'orange',
+    message: r.ok ? `Reachable at ${r.baseUrl}` : `Not reachable via service DNS (${r.error || 'no response'})`,
+    url: r.baseUrl || urls[0]
+  };
+}
+
+function dockerStatusFromContainer(c){
+  if (!c) return { status:'red', message:'Container not found' };
+  const state = c.State || '';
+  const health = c.Status || '';
+  const running = state === 'running';
+  if (!running) return { status:'red', message:health || state || 'Not running', container:c };
+  if (/\(unhealthy\)/i.test(health)) return { status:'red', message:health, container:c };
+  if (/\(health: starting\)/i.test(health)) return { status:'orange', message:health, container:c };
+  return { status:'green', message:health || 'Running', container:c };
+}
+async function dockerRequest(path, timeoutMs=1200){
+  const socketPath = process.env.DOCKER_SOCKET || '/var/run/docker.sock';
+  return new Promise(resolve => {
+    const req = require('http').request({ socketPath, path, method:'GET', timeout: timeoutMs }, res => {
+      let data='';
+      res.on('data', d => { data += d; if(data.length > 5*1024*1024) req.destroy(); });
+      res.on('end', () => {
+        try { resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, statusCode: res.statusCode, data: data ? JSON.parse(data) : null }); }
+        catch { resolve({ ok:false, statusCode:res.statusCode, error:'Invalid Docker API response' }); }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout')));
+    req.on('error', err => resolve({ ok:false, error:err.message }));
+    req.end();
+  });
+}
+async function collectDockerManager(){
+  const r = await dockerRequest('/containers/json?all=1');
+  if(!r.ok) return { ok:false, status:'grey', message:`Docker socket not available (${r.error || 'not mounted'})`, containers:[], byService:{} };
+  const containers = (r.data || []).map(c => ({
+    id: c.Id,
+    names: (c.Names || []).map(n => String(n).replace(/^\//,'')),
+    image: c.Image,
+    state: c.State,
+    statusText: c.Status,
+    service: c.Labels?.['com.docker.compose.service'] || '',
+    project: c.Labels?.['com.docker.compose.project'] || '',
+    created: c.Created,
+    ports: c.Ports || []
+  }));
+  const byService = {};
+  for(const c of containers){
+    const keys = [c.service, ...c.names].filter(Boolean);
+    for(const k of keys){ if(!byService[k]) byService[k] = c; }
+  }
+  return { ok:true, status:'green', message:`Docker Engine online · ${containers.filter(c=>c.state==='running').length}/${containers.length} containers running`, containers, byService };
+}
+function serviceFromDocker(docker, serviceName, aliases=[]){
+  if(!docker?.ok) return { status:'grey', message:'Docker status unavailable' };
+  const c = [serviceName, ...aliases].map(k => docker.byService?.[k]).find(Boolean);
+  return dockerStatusFromContainer(c);
+}
+function optionalServiceFromDocker(docker, serviceName, aliases=[]){
+  if(!docker?.ok) return { status:'grey', message:'Docker status unavailable' };
+  const c = [serviceName, ...aliases].map(k => docker.byService?.[k]).find(Boolean);
+  if(!c) return { status:'grey', message:'Optional service not enabled' };
+  return dockerStatusFromContainer(c);
+}
+function shortContainerMessage(st){
+  return st?.message || 'Unknown';
+}
+
+async function collectBroadcastHealth(docker){
+  const ffmpegCandidates = uniqueList([
+    process.env.FFMPEG_ENGINE_URL,
+    'http://ffmpeg-engine:3100',
+    'http://rally-graphics-ffmpeg-engine:3100',
+    'http://localhost:3100'
+  ]);
+  const mediamtxCandidates = uniqueList([
+    process.env.MEDIAMTX_API_URL,
+    'http://mediamtx:9997',
+    'http://rally-graphics-mediamtx:9997',
+    'http://localhost:9997'
+  ]);
+  const ffDocker = serviceFromDocker(docker, 'ffmpeg-engine', ['rally-graphics-ffmpeg-engine']);
+  const mtDocker = serviceFromDocker(docker, 'mediamtx', ['rally-graphics-mediamtx']);
+  const ffHealth = await firstWorkingJson(ffmpegCandidates, '/status', 1800);
+  let mtPaths = await firstWorkingJson(mediamtxCandidates, '/v3/paths/list', 1800);
+  const mtApiProbe = mtPaths.ok ? mtPaths : await firstWorkingJson(mediamtxCandidates, '/v3/config/global/get', 1500);
+  const mtBase = (mtPaths.ok ? mtPaths.baseUrl : mtApiProbe.baseUrl) || mediamtxCandidates[0];
+  const mtRtmp = mtBase && mtApiProbe.ok ? await httpJson(mtBase + '/v3/rtmpconns/list', 1200) : { ok:false };
+  const mtRtsp = mtBase && mtApiProbe.ok ? await httpJson(mtBase + '/v3/rtspconns/list', 1200) : { ok:false };
+  const mtSrt = mtBase && mtApiProbe.ok ? await httpJson(mtBase + '/v3/srtconns/list', 1200) : { ok:false };
+  const ffStatus = ffHealth.data?.status || {};
+  const runningJobs = Object.values(ffStatus).filter(x => x && x.running).length;
+  const pathItems = Array.isArray(mtPaths.data?.items) ? mtPaths.data.items : [];
+  const publisherCount = pathItems.filter(p => p.ready || p.sourceReady).length;
+  const subscriberCount = pathItems.reduce((acc,p) => acc + Number(p.readers?.length || p.readerCount || 0), 0);
+  let ffState = ffHealth.ok ? (runningJobs > 0 ? 'green' : 'yellow') : (ffDocker.status === 'green' ? 'orange' : ffDocker.status);
+  let ffMsg = ffHealth.ok ? (runningJobs > 0 ? `Running · ${runningJobs} active job${runningJobs===1?'':'s'}` : 'Idle · online · 0 active jobs') : (ffDocker.status === 'green' ? `Container running, API not reachable (${ffHealth.error || 'no response'})` : `Offline · ${ffHealth.error || shortContainerMessage(ffDocker)}`);
+  let mtState = mtApiProbe.ok ? 'green' : (mtDocker.status === 'green' ? 'orange' : mtDocker.status);
+  let mtMsg = mtApiProbe.ok ? `Online · ${publisherCount} publisher${publisherCount===1?'':'s'} · ${subscriberCount} subscriber${subscriberCount===1?'':'s'}` : (mtDocker.status === 'green' ? `Container running, API not reachable (${mtApiProbe.error || mtPaths.error || 'no response'})` : `Offline · ${mtApiProbe.error || mtPaths.error || shortContainerMessage(mtDocker)}`);
+  return {
+    ffmpeg: { ok: ffHealth.ok, containerStatus: ffDocker.status, status: ffState, message: ffMsg, url: ffHealth.baseUrl || ffmpegCandidates[0], activeJobs: runningJobs, jobs: ffStatus },
+    mediamtx: { ok: mtApiProbe.ok, containerStatus: mtDocker.status, status: mtState, message: mtMsg, apiUrl: mtBase || mediamtxCandidates[0], triedUrls: mediamtxCandidates, paths: pathItems.map(p => ({ name:p.name, ready: !!(p.ready || p.sourceReady), readers:p.readers?.length || p.readerCount || 0 })).slice(0,50), connections: { rtmp: mtRtmp.ok ? (mtRtmp.data?.itemCount ?? mtRtmp.data?.items?.length ?? 0) : null, rtsp: mtRtsp.ok ? (mtRtsp.data?.itemCount ?? mtRtsp.data?.items?.length ?? 0) : null, srt: mtSrt.ok ? (mtSrt.data?.itemCount ?? mtSrt.data?.items?.length ?? 0) : null } }
+  };
+}
+
 app.get('/api/system/status', requireLogin, async (req, res) => {
   const database = await db.status();
   let internet = { ok:true, warning:false, message:'Rally data connection looks OK' };
@@ -800,7 +1312,26 @@ app.get('/api/system/status', requireLogin, async (req, res) => {
   const previewOnline = outputSockets.preview.size > 0;
   const programOnline = outputSockets.program.size > 0;
   const cfg = { version: APP_VERSION, exportedConfigVersion: 3 };
-  res.json({ ok:true, version: APP_VERSION, app:{ok:true,message:'Application API online'}, database, internet, outputs:{ sockets: socketCount, previewOnline, programOnline, preview: previewOnline ? 'Preview output connected' : 'Preview page not open', program: programOnline ? 'Program output connected' : 'Program output page not open' }, config:cfg, state:shared });
+  const docker = await collectDockerManager();
+  const broadcast = await collectBroadcastHealth(docker);
+  const app1Docker = serviceFromDocker(docker, 'app1');
+  const app2Docker = optionalServiceFromDocker(docker, 'app2');
+  const nginxDocker = optionalServiceFromDocker(docker, 'nginx', ['rally-graphics-nginx']);
+  const postgresDocker = serviceFromDocker(docker, 'postgres', ['rally-graphics-postgres']);
+  const containers = {
+    app1: { status: app1Docker.status === 'red' ? 'orange' : 'green', message:`Current controller instance ${INSTANCE_ID} online${app1Docker.message ? ' · ' + app1Docker.message : ''}` },
+    app2: { status: app2Docker.status, message: app2Docker.status === 'green' ? `Worker online · ${app2Docker.message}` : shortContainerMessage(app2Docker) },
+    nginx: { status: nginxDocker.status, message: nginxDocker.status === 'green' ? `Reverse proxy running · ${nginxDocker.message}` : shortContainerMessage(nginxDocker) },
+    postgres: { status: database.ok ? 'green' : (postgresDocker.status === 'green' ? 'orange' : postgresDocker.status), message: database.ok ? 'Online' : (database.message || shortContainerMessage(postgresDocker)) },
+    ffmpegEngine: { status:broadcast.ffmpeg.status, message:broadcast.ffmpeg.message },
+    mediamtx: { status:broadcast.mediamtx.status, message:broadcast.mediamtx.message }
+  };
+  broadcast.summary = {
+    input: (broadcast.mediamtx.paths || []).some(p => p.ready) ? 'MediaMTX input active' : 'Idle / disconnected',
+    graphics: 'Existing RGE graphics output ready',
+    outputs: broadcast.ffmpeg.activeJobs > 0 ? `${broadcast.ffmpeg.activeJobs} FFmpeg job${broadcast.ffmpeg.activeJobs===1?'':'s'} running` : 'Idle'
+  };
+  res.json({ ok:true, version: APP_VERSION, app:{ok:true,message:'Application API online'}, database, internet, outputs:{ sockets: socketCount, previewOnline, programOnline, preview: previewOnline ? 'Preview output connected' : 'Preview page not open', program: programOnline ? 'Program output connected' : 'Program output page not open' }, broadcast, containers, config:cfg, state:shared });
 });
 app.get('/api/error-log', requireLogin, async (req, res) => {
   const database = await db.status();

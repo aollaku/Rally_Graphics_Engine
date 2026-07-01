@@ -254,7 +254,20 @@ function parseEntryText(text) {
 async function getEventInfo(eventId, ttl) {
   const url = urlIndex(eventId);
   const html = await fetchHtml(url, ttl);
-  return { ...pageMeta(html, url), eventId, urls: { overall: urlOverall(eventId), entries: urlEntry(eventId) }, maxStageProbe: 20, fetchedAt: new Date().toISOString() };
+  const info = pageMeta(html, url);
+  // Some events expose only a generic index title such as "Results on the Web".
+  // In that case, use the overall-results page subtitle because it often contains
+  // the real rally/stage name, e.g. "... - LLANGOWER 1".
+  const generic = /^(results\s+on\s+the\s+web|rally\s+results|results)$/i;
+  if (generic.test(info.eventTitle || '') || generic.test(info.subtitle || '')) {
+    try {
+      const overallHtml = await fetchHtml(urlOverall(eventId), ttl);
+      const overall = pageMeta(overallHtml, urlOverall(eventId));
+      if (overall.subtitle) info.subtitle = overall.subtitle;
+      if (!generic.test(overall.eventTitle || '')) info.eventTitle = overall.eventTitle;
+    } catch (_) {}
+  }
+  return { ...info, eventId, urls: { overall: urlOverall(eventId), entries: urlEntry(eventId) }, maxStageProbe: 20, fetchedAt: new Date().toISOString() };
 }
 async function getOverall(eventId, limit, ttl) { const url = urlOverall(eventId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
 async function getStage(eventId, stageId, limit, ttl) { const url = urlStage(eventId, stageId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }

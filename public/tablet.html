@@ -2,37 +2,79 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>Rally Graphics - Tablet Controller</title>
   <link rel="stylesheet" href="/style.css">
 </head>
-<body class="tablet-controller">
-  <main class="tabletShell">
-    <header class="tabletTop"><strong>Rally Graphics</strong><input id="eventId" inputmode="numeric" value="757"><button id="saveEvent">↻</button><span class="badge live">Live</span></header>
-    <section class="tabletTiles">
-      <button class="tile overall" data-type="overall">🏆<strong>OVERALL</strong><span>Pages of 10</span></button>
-      <button class="tile stageTile" data-type="stage">⚑<strong>STAGE RESULTS</strong><span>Pages of 10</span></button>
-      <button class="tile stageTile" data-type="stageTimes">⏱<strong>STAGE TIMES</strong><span>Compact</span></button>
-      <button class="tile entries" data-type="entries">👥<strong>ENTRY LIST</strong><span>All Competitors</span></button>
+<body class="tablet-controller tablet-v2">
+  <main class="tablet2Shell">
+    <header class="tablet2Header">
+      <div class="tablet2Title">EVENT I.D. SELECTION</div>
+      <div class="tablet2EventRow">
+        <div class="tablet2IdBox">I.D.</div>
+        <div id="eventNameDisplay" class="tablet2EventName">DISPLAY EVENT NAME HERE</div>
+        <button id="saveEvent" class="tablet2Refresh" title="Refresh event data">↻</button>
+      </div>
+      <input id="eventId" type="hidden" value="757">
+    </header>
+
+    <section class="tablet2TopGrid">
+      <div class="tablet2PreviewBlock">
+        <h3>GFX PREVIEW MONITOR</h3>
+        <div class="tablet2PreviewMonitor">
+          <iframe id="previewFrame" title="GFX preview monitor"></iframe>
+          <div id="tabletLogoPreviewOverlay" class="tablet2LogoPreviewOverlay" aria-hidden="true"><img id="tabletLogoPreviewImg" alt="Logo preview"></div>
+          <div id="tabletPreviewEmpty" class="tablet2PreviewEmpty">THUMBNAIL<br>PREVIEW<br>OF GFX</div>
+        </div>
+      </div>
+
+      <div class="tablet2LogoBlock">
+        <h3>LOGO</h3>
+        <div class="tablet2LogoGrid">
+          <button id="takeBug" class="tablet2Btn greenBtn">TAKE<br>BUG</button>
+          <button id="takeToPgm" class="tablet2Btn redBtn">TAKE<br>TO PGM</button>
+          <button class="tablet2Btn logoSlot" data-logo-slot="1">1</button>
+          <button class="tablet2Btn logoSlot" data-logo-slot="2">2</button>
+          <button id="clearGraphic" class="tablet2Btn clearBtn">CLEAR<br>PGM</button>
+          <button id="clearPreview" class="tablet2Btn clearPreviewBtn">CLEAR<br>PREVIEW</button>
+        </div>
+      </div>
     </section>
-    <section class="tabletStage"><h3>Stage Selector</h3><div id="stageButtons" class="stage-grid tabletStages"></div></section>
-    <section class="tabletStage"><h3>Page Selector</h3><div id="pageButtons" class="stage-grid tabletStages page-grid"></div><p><span id="totalRows">-- rows</span></p></section>
-    <section class="tabletActions">
-      <button id="openOutput" class="outline">↗ Open Output</button>
-      <button id="copyUrl" class="outline">📋 Copy URL</button>
-      <button id="clearGraphic" class="red">🗑 Clear Graphic</button>
+
+    <section class="tablet2Panel gfxPanel">
+      <h3>GFX SELECTOR</h3>
+      <div class="tablet2GfxGrid">
+        <button data-type="entries">ENTRY<br>LIST</button>
+        <button data-type="stage">STAGE<br>RES<br>(FULL)</button>
+        <button data-type="stageTimes">STAGE<br>RES<br>(SMALL)</button>
+        <button data-type="overall">O/A<br>LEADER<br>BOARD</button>
+      </div>
     </section>
-    <section class="tabletActions">
-      <button id="addRundown" class="green">＋ Add</button>
-      <button id="takeNext" class="blue">Take Next</button>
-      <button id="clearRundown" class="red">Clear Rundown</button>
+
+    <section class="tablet2Panel">
+      <h3>STAGE SELECTOR</h3>
+      <div id="stageButtons" class="tablet2NumberGrid"></div>
     </section>
-    <div id="rundownList" class="rundownList tabletRundown"></div>
-    <input id="outputUrl" readonly>
-    <p id="eventInfo" class="muted"></p>
-    <span id="pageNo" class="hiddenText">Page 1</span><input id="pageSize" type="hidden" value="10"><select id="stageSelect" hidden></select><select id="rundownSeconds" hidden><option value="10">10</option></select><button id="autoRundown" hidden></button>
+
+    <section class="tablet2Panel pagePanel">
+      <div class="tablet2PageTitleRow">
+        <button id="allAutoPages" class="autoBtn">ALL [AUTO]</button>
+        <h3>PAGE SELECTOR</h3>
+      </div>
+      <div id="pageButtons" class="tablet2NumberGrid pageButtons"></div>
+    </section>
+
+    <footer class="tablet2Footer">
+      <span id="eventInfo">Choose a GFX, stage and page. Preview appears here first, then press TAKE TO PGM.</span>
+      <input id="outputUrl" readonly>
+    </footer>
+
+    <input id="pageSize" type="hidden" value="10">
+    <select id="stageSelect" hidden></select>
+    <span id="pageNo" class="hiddenText">Page 1</span>
+    <span id="totalRows" class="hiddenText">-- rows</span>
   </main>
 <script src="/socket.io/socket.io.js"></script>
-<script src="/controller.js"></script>
+<script src="/controller.js?v=7"></script>
 </body>
 </html>

@@ -35,9 +35,15 @@ services:
       DEFAULT_ADMIN_PASSWORD: "superadmin123"
       DATABASE_URL: "postgres://rally:rally_password@postgres:5432/rally_graphics"
       BACKUP_DIR: "/backups"
+      FFMPEG_ENGINE_URL: "http://ffmpeg-engine:3100"
+      MEDIAMTX_API_URL: "http://mediamtx:9997"
+      RGE_GRAPHICS_URL: "http://app1:3000/output/live"
+      RGE_INCOMING_URL: "rtmp://mediamtx:1935/live"
+      DOCKER_SOCKET: "/var/run/docker.sock"
     volumes:
       - backups_data:/backups
       - logos_data:/app/public/uploads/logos
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
@@ -64,15 +70,64 @@ services:
       DEFAULT_ADMIN_PASSWORD: "superadmin123"
       DATABASE_URL: "postgres://rally:rally_password@postgres:5432/rally_graphics"
       BACKUP_DIR: "/backups"
+      FFMPEG_ENGINE_URL: "http://ffmpeg-engine:3100"
+      MEDIAMTX_API_URL: "http://mediamtx:9997"
+      RGE_GRAPHICS_URL: "http://app1:3000/output/live"
+      RGE_INCOMING_URL: "rtmp://mediamtx:1935/live"
+      DOCKER_SOCKET: "/var/run/docker.sock"
     volumes:
       - backups_data:/backups
       - logos_data:/app/public/uploads/logos
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     healthcheck:
       test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3000/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 20s
+
+  ffmpeg-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile.ffmpeg
+    image: rally-graphics-ffmpeg-engine:latest
+    container_name: rally-graphics-ffmpeg-engine
+    restart: unless-stopped
+    depends_on:
+      mediamtx:
+        condition: service_started
+      app1:
+        condition: service_healthy
+    environment:
+      PORT: "3100"
+      FFMPEG_PATH: "/usr/bin/ffmpeg"
+      CHROME_BIN: "/usr/bin/chromium-browser"
+      RGE_GRAPHICS_URL: "http://app1:3000/output/live"
+      RGE_INCOMING_URL: "rtmp://mediamtx:1935/live"
+    volumes:
+      - recordings_data:/engine/recordings
+    ports:
+      - "3100:3100"
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://localhost:3100/healthz',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: rally-graphics-mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"   # RTSP
+      - "1935:1935"   # RTMP ingest/playback
+      - "8888:8888"   # HLS
+      - "8889:8889"   # WebRTC
+      - "8890:8890/udp" # SRT
+      - "9997:9997"   # API
+    volumes:
+      - ./mediamtx/mediamtx.yml:/mediamtx.yml:ro
 
   postgres:
     image: postgres:16-alpine
@@ -110,3 +165,4 @@ volumes:
   postgres_data:
   backups_data:
   logos_data:
+  recordings_data:

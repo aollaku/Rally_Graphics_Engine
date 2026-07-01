@@ -142,6 +142,9 @@ html,body{
   --gfx-brightness:100%;
   --gfx-contrast:100%;
   --gfx-anim-duration:280ms;
+  --gfx-animation-type:fade;
+  --gfx-out-animation-type:fade;
+  --gfx-row-stagger:0ms;
   --gfx-easing:ease-out;
   --gfx-bg-opacity:1;
   --gfx-border-opacity:1;
@@ -202,6 +205,17 @@ html,body{
 /* v40 anti-flicker: active layer is never class-cleaned at animation end; inactive layer is hidden without display:none during live swaps. */
 .gfx-layer.gfx-inactive{display:block!important;}
 
+
+/* Phase 7 Animation Studio: optional row-by-row reveal. Layout is not changed. */
+.gfx-layer.gfx-taking .template-row,
+.gfx-layer.gfx-taking .compact-row{
+  animation: rgeRowIn var(--gfx-anim-duration) var(--gfx-easing) both;
+}
+@keyframes rgeRowIn{
+  from{opacity:0;transform:translateY(10px);}
+  to{opacity:1;transform:translateY(0);}
+}
+
 /* Scene engine overlays */
 .gfx-layer { opacity: calc(var(--gfx-opacity, 1) * var(--scene-main-opacity, 1)); }
 .scene-bug, .scene-clock {
@@ -245,3 +259,11 @@ html,body{
   white-space:nowrap;
 }
 .scene-clock{will-change: transform, opacity;}
+
+
+/* v41 output viewport restore: prevent old designer/global position settings from cropping graphics. */
+.gfx,.gfx-layer{left:0!important;top:0!important;right:0!important;bottom:0!important;width:100%!important;height:100%!important;transform:translate(0,0) scale(1) translateZ(0)!important;transform-origin:top left!important;}
+.template-header>div,.template-row .cell{min-width:0;}
+.template-row{min-width:0;}
+.template-table{width:100%;box-sizing:border-box;}
+.template-board{box-sizing:border-box;max-width:none;}
