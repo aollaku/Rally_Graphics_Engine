@@ -164,7 +164,7 @@ function applySceneLayers(scene={}){
   const pct = (v, def=100) => String(Math.max(0, Math.min(100, Number(v ?? def))) / 100);
   // Bug text, Logo and Clock visibility is controlled ONLY by the controller layer buttons.
   // The settings panel only stores content/style and never auto-shows these layers.
-  const activeLogoUrl = (scene?.logoUrls && scene.logoUrls[OUTPUT_MODE]) || bugLayer.logoUrl || '';
+  const activeLogoUrl = (scene?.logoUrls && scene.logoUrls[OUTPUT_MODE]) || ''; // never fall back to old designer logo; avoids stale logo on output
   const showBugText = !!visibility.bug && !!bugLayer.text;
   const showLogo = !!visibility.logo && !!activeLogoUrl;
   bug.style.display = (showBugText || showLogo) ? 'flex' : 'none';
@@ -400,7 +400,7 @@ async function render(state){
   }
   const page=g.page||1, size=g.pageSize||10, eventId=state.eventId;
   let data;
-  if(g.type==='overall') data=await api(`/api/event/${eventId}/overall?limit=${page*size}`);
+  if(g.type==='overall') data=await api(`/api/event/${eventId}/overall?stageId=${Number(g.stageId||0)}&limit=${page*size}`);
   if(g.type==='stage') data=await api(`/api/event/${eventId}/stage/${g.stageId}?limit=${page*size}`);
   if(g.type==='stageTimes') data=await api(`/api/event/${eventId}/stage/${g.stageId}?limit=${page*size}`);
   if(g.type==='entries') data=await api(`/api/event/${eventId}/entries?limit=${page*size}`);
@@ -422,7 +422,6 @@ async function render(state){
 function renderEntry(title, rows){
   return `<div class="template-stage">
     <div class="template-board entry-board">
-      <div class="title-line"></div>
       <h1 class="template-title entry">${esc(title)}</h1>
       <div class="template-table entry">
         <div class="template-header entryHead"><div></div><div>Driver</div><div>Co-Driver</div><div>Car</div><div>Class</div><div>Champs</div></div>

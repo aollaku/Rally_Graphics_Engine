@@ -10,8 +10,17 @@ function clean(s) { return String(s || '').replace(/\u00a0/g, ' ').replace(/\s+/
 function isTime(s) { return /^\d+:\d{2}:\d{2}(?:\.\d+)?$|^\d+:\d{2}(?:\.\d+)?$/.test(s); }
 function isClass(s) { return classValues.includes(String(s).trim()); }
 function startsCar(s) { return carMakes.some(m => s === m || s.startsWith(m + ' ')); }
-function urlOverall(eventId) { return `${BASE}/overall.php?LeaderBoard=Overall+Leader+Board&EventID=${eventId}&StageID=0&e=${eventId}&selection=all`; }
-function urlStage(eventId, stageId) { return `${BASE}/overall.php?EventID=${eventId}&StageID=${stageId}&e=${eventId}&m=0&ls=0&selection=all`; }
+function urlOverall(eventId, stageId = 0) {
+  const sid = Number(stageId || 0);
+  // DJames/BTRDA stage selection is driven by ls=. Keep StageID too for compatibility,
+  // but ls is the parameter that changes the stage data on the results website.
+  return `${BASE}/overall.php?LeaderBoards=Leader+Boards&LeaderBoard=Overall+Leader+Board&EventID=${eventId}&StageID=${sid}&e=${eventId}&ls=${sid}&simple=1&selection=all`;
+}
+function urlStage(eventId, stageId) {
+  const sid = Number(stageId || 0);
+  // Do not leave ls=0: that forced every stage selector button to load the first stage/page.
+  return `${BASE}/overall.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&m=0&ls=${sid}&simple=1&selection=all`;
+}
 function urlEntry(eventId) { return `${BASE}/entry.php?EntryList=Entry+List&EventID=${eventId}&e=${eventId}`; }
 function urlIndex(eventId) { return `${BASE}/index.php?EventID=${eventId}`; }
 
@@ -269,7 +278,7 @@ async function getEventInfo(eventId, ttl) {
   }
   return { ...info, eventId, urls: { overall: urlOverall(eventId), entries: urlEntry(eventId) }, maxStageProbe: 20, fetchedAt: new Date().toISOString() };
 }
-async function getOverall(eventId, limit, ttl) { const url = urlOverall(eventId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
+async function getOverall(eventId, limit, ttl, stageId = 0) { const url = urlOverall(eventId, stageId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
 async function getStage(eventId, stageId, limit, ttl) { const url = urlStage(eventId, stageId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
 async function getEntries(eventId, limit, ttl) { const url = urlEntry(eventId); return parseEntries(await fetchHtml(url, ttl), url, limit); }
 

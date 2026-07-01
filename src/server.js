@@ -566,8 +566,9 @@ app.get('/api/event/:eventId/info', async (req, res) => {
 
 app.get('/api/event/:eventId/overall', async (req, res) => {
   try {
-    const data = await scraper.getOverall(req.params.eventId, Number(req.query.limit || 999), CACHE_TTL_MS);
-    await db.upsertSnapshot(req.params.eventId, 'overall', 0, data);
+    const stageId = Number(req.query.stageId || 0);
+    const data = await scraper.getOverall(req.params.eventId, Number(req.query.limit || 999), CACHE_TTL_MS, stageId);
+    await db.upsertSnapshot(req.params.eventId, 'overall', stageId, data);
     res.json({ ok: true, data });
   } catch (err) { res.status(502).json({ ok: false, error: err.message }); }
 });
@@ -734,23 +735,30 @@ app.post('/api/scene/layer-trigger', requireControl, async (req, res) => {
     const target = ['preview','program','both'].includes(req.body.target) ? req.body.target : 'preview';
     if (!['bug','logo','clock'].includes(layer)) return res.status(400).json({ ok:false, error:'Unknown layer button.' });
     if (layer === 'logo') {
+      const hasSlot = Object.prototype.hasOwnProperty.call(req.body || {}, 'slot');
       const slot = Math.max(1, Math.min(2, Number(req.body.slot || 1)));
       const logos = listUploadedLogos();
-      const chosen = logos[slot - 1];
-      if (!chosen) return res.status(400).json({ ok:false, error:`Logo slot ${slot} is empty. Upload at least ${slot} PNG logo(s) on the main controller page.` });
       state.scene.layers = { ...DEFAULT_SCENE_STATE.layers, ...(state.scene.layers || {}) };
       state.scene.layers.bug = { ...DEFAULT_SCENE_STATE.layers.bug, ...(state.scene.layers.bug || {}), logoEnabled: true };
       state.scene.logoUrls = { ...DEFAULT_SCENE_STATE.logoUrls, ...(state.scene.logoUrls || {}) };
+
+      // Tablet buttons 1/2 use the first two uploaded PNGs as fixed slots.
+      // Desktop Logo TAKE without a slot uses the logo selected in the main controller library.
+      let chosenUrl = '';
+      if (hasSlot) chosenUrl = logos[slot - 1]?.url || '';
+      else chosenUrl = state.scene.layers.bug.logoUrl || logos[0]?.url || '';
+      if (!chosenUrl) return res.status(400).json({ ok:false, error: hasSlot ? `Logo slot ${slot} is empty. Upload at least ${slot} PNG logo(s) on the main controller page.` : 'No logo is selected. Upload/select a PNG logo on the main controller page.' });
+
       if (target === 'preview' || target === 'both') {
-        state.scene.logoUrls.preview = chosen.url;
-        state.scene.activeLogoSlotPreview = slot;
+        state.scene.logoUrls.preview = chosenUrl;
+        state.scene.activeLogoSlotPreview = hasSlot ? slot : Number(state.scene.activeLogoSlotPreview || 1);
       }
       if (target === 'program' || target === 'both') {
-        state.scene.logoUrls.program = chosen.url;
-        state.scene.activeLogoSlotProgram = slot;
-        state.scene.layers.bug.logoUrl = chosen.url;
+        state.scene.logoUrls.program = chosenUrl;
+        state.scene.activeLogoSlotProgram = hasSlot ? slot : Number(state.scene.activeLogoSlotProgram || 1);
       }
-      state.scene.activeLogoSlot = slot;
+      state.scene.layers.bug.logoUrl = chosenUrl;
+      if (hasSlot) state.scene.activeLogoSlot = slot;
     }
     state.scene.layerVisibility = {
       preview: { ...DEFAULT_SCENE_STATE.layerVisibility.preview, ...((state.scene.layerVisibility || {}).preview || {}) },
@@ -785,8 +793,17 @@ app.post('/api/scene/layer-clear', requireControl, async (req, res) => {
     // and clear all overlay layers for the requested target. This keeps Logo, Bug and Clock independent.
     if (layer && !validLayers.includes(layer)) return res.status(400).json({ ok:false, error:'Unknown layer.' });
     const clearTarget = (t) => {
-      if (layer) state.scene.layerVisibility[t][layer] = false;
-      else state.scene.layerVisibility[t] = { bug:false, logo:false, clock:false };
+      if (layer) {
+        state.scene.layerVisibility[t][layer] = false;
+        if (layer === 'logo') {
+          state.scene.logoUrls = { ...DEFAULT_SCENE_STATE.logoUrls, ...(state.scene.logoUrls || {}) };
+          state.scene.logoUrls[t] = '';
+        }
+      } else {
+        state.scene.layerVisibility[t] = { bug:false, logo:false, clock:false };
+        state.scene.logoUrls = { ...DEFAULT_SCENE_STATE.logoUrls, ...(state.scene.logoUrls || {}) };
+        state.scene.logoUrls[t] = '';
+      }
     };
     if (target === 'preview' || target === 'both') clearTarget('preview');
     if (target === 'program' || target === 'both') clearTarget('program');

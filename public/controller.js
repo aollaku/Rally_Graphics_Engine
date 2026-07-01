@@ -4,7 +4,7 @@ let selectedType = 'overall';
 let selectedStage = 1;
 let selectedPage = 1;
 let pageSize = 10;
-let totals = { overall:0, entries:0, stage:{} };
+let totals = { overall:0, overallStage:{}, entries:0, stage:{} };
 let rundown = [];
 let rundownIndex = -1;
 let autoTimer = null;
@@ -16,9 +16,10 @@ const token = new URLSearchParams(location.search).get('token') || '';
 const tokenPart = token ? `?token=${encodeURIComponent(token)}` : '';
 const auth = token ? { 'x-rally-token': token } : {};
 const isTabletController = document.body.classList.contains('tablet-controller');
+function usesStageSelector(type){ return type === 'overall' || type === 'stage' || type === 'stageTimes'; }
 
 function withToken(path){ if (!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
-function api(path, opts={}){ return fetch(withToken(path), {headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
+function api(path, opts={}){ return fetch(withToken(path), {cache:'no-store', headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
 function outputOrigin(){
   const host = location.hostname || 'localhost';
   return `http://${host}:8080`;
@@ -26,8 +27,8 @@ function outputOrigin(){
 function outputUrl(){ return outputOrigin() + '/output/live' + tokenPart; }
 function previewUrl(){ return location.origin + '/preview/live' + (tokenPart ? tokenPart + '&controllerPreview=1' : '?controllerPreview=1'); }
 function previewHttpUrl(){ const host = location.hostname || 'localhost'; return `http://${host}:8080/preview/live${tokenPart}`; }
-function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
-function totalFor(type, stageId=0){ return type === 'overall' ? totals.overall : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
+function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Stage ${stageId || 0} Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
+function totalFor(type, stageId=0){ return type === 'overall' ? (totals.overallStage?.[stageId] || totals.overall || 0) : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
 function totalPagesFor(type, stageId=0){ return Math.max(1, Math.ceil((totalFor(type, stageId) || 0) / pageSize)); }
 function setLastUpdated(){ const el=qs('#lastUpdated'); if(el) el.textContent = new Date().toLocaleString(); }
 function setOutputFields(){
@@ -42,17 +43,17 @@ function initStages(){
     for(let i=1;i<=20;i++){
       const b=document.createElement('button');
       b.textContent = String(i); b.title = 'Stage '+i;
-      b.onclick = ()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); if(selectedType!=='stageTimes') selectedType='stage'; selectedStage=i; selectedPage=1; tabletSelectedKey=tabletSelectionKey(); updateActive(); loadTotalsForSelection(true); };
+      b.onclick = ()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); selectedStage=i; selectedPage=Math.max(1, Number(selectedPage || 1)); tabletSelectedKey=tabletSelectionKey(selectedType, selectedStage); updateActive(); loadTotalsForSelection(true); };
       box.appendChild(b);
     }
   });
   const sel = qs('#stageSelect');
-  if(sel){ sel.innerHTML=''; for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent='Stage '+i; sel.appendChild(o); } sel.onchange=()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); selectedStage=Number(sel.value); if(selectedType!=='stageTimes') selectedType='stage'; selectedPage=1; tabletSelectedKey=tabletSelectionKey(); updateActive(); loadTotalsForSelection(true); }; }
+  if(sel){ sel.innerHTML=''; for(let i=1;i<=20;i++){ const o=document.createElement('option'); o.value=i; o.textContent='Stage '+i; sel.appendChild(o); } sel.onchange=()=>{ if(isTabletController) tabletStopAutoPages('ALL [AUTO] stopped. New stage loaded to preview.'); selectedStage=Number(sel.value); selectedPage=Math.max(1, Number(selectedPage || 1)); tabletSelectedKey=tabletSelectionKey(selectedType, selectedStage); updateActive(); loadTotalsForSelection(true); }; }
 }
 function updateActive(){
   qsa('[data-type]').forEach(b=>b.classList.toggle('active', b.dataset.type===selectedType));
   const sel=qs('#stageSelect'); if(sel) sel.value=String(selectedStage);
-  qsa('#stageButtons button').forEach((b,i)=>b.classList.toggle('active', (selectedType==='stage' || selectedType==='stageTimes') && i+1===selectedStage));
+  qsa('#stageButtons button').forEach((b,i)=>b.classList.toggle('active', i+1===selectedStage));
   const p=qs('#pageNo'); if(p) p.textContent='Page '+selectedPage;
   qsa('.totalRows').forEach(total => total.textContent = `${totalFor(selectedType, selectedStage) || '--'} rows`);
 }
@@ -80,12 +81,12 @@ function renderPageButtons(){
 async function loadTotalsForSelection(autoTake=false){
   const eventId = (qs('#eventId')?.value || state.eventId || '757').replace(/\D/g,'') || '757';
   let res;
-  if(selectedType==='overall') res = await api(`/api/event/${eventId}/overall?limit=999`);
+  if(selectedType==='overall') res = await api(`/api/event/${eventId}/overall?stageId=${selectedStage}&limit=999`);
   if(selectedType==='stage' || selectedType==='stageTimes') res = await api(`/api/event/${eventId}/stage/${selectedStage}?limit=999`);
   if(selectedType==='entries') res = await api(`/api/event/${eventId}/entries?limit=999`);
   if(res?.ok){
     const total = res.data.totalRows || res.data.rows?.length || 0;
-    if(selectedType==='overall') totals.overall=total;
+    if(selectedType==='overall'){ totals.overall=total; totals.overallStage[selectedStage]=total; }
     else if(selectedType==='entries') totals.entries=total;
     else totals.stage[selectedStage]=total;
     updateTabletEventNameFromData(res.data);
@@ -105,10 +106,10 @@ function updateTabletEventNameFromData(data={}){
 async function loadAllTotals(){
   const eventId = (qs('#eventId')?.value || '757').replace(/\D/g,'') || '757';
   const [overall, entries] = await Promise.allSettled([
-    api(`/api/event/${eventId}/overall?limit=999`),
+    api(`/api/event/${eventId}/overall?stageId=${selectedStage}&limit=999`),
     api(`/api/event/${eventId}/entries?limit=999`)
   ]);
-  if(overall.value?.ok) totals.overall = overall.value.data.totalRows || overall.value.data.rows.length;
+  if(overall.value?.ok){ totals.overall = overall.value.data.totalRows || overall.value.data.rows.length; totals.overallStage[selectedStage]=totals.overall; }
   if(entries.value?.ok) totals.entries = entries.value.data.totalRows || entries.value.data.rows.length;
   renderPageButtons();
 }
@@ -141,13 +142,13 @@ function selectedTakeTarget(){
 //   2nd press on the same graphic/page = TAKE that graphic to Program/output.
 // This gives the operator a safe preview by default while still allowing fast double-press to air.
 function graphicPressKey(type, stageId, page){
-  const normalizedStage = (type === 'stage' || type === 'stageTimes') ? Number(stageId || selectedStage || 1) : 0;
+  const normalizedStage = usesStageSelector(type) ? Number(stageId || selectedStage || 1) : 0;
   return [type || selectedType, normalizedStage, Number(page || selectedPage || 1), Number(qs('#pageSize')?.value || pageSize || 10)].join('|');
 }
 function previewGraphicKey(){
   const g = state?.scene?.preview || {};
   if(!g.type || g.type === 'blank') return '';
-  const normalizedStage = (g.type === 'stage' || g.type === 'stageTimes') ? Number(g.stageId || 1) : 0;
+  const normalizedStage = usesStageSelector(g.type) ? Number(g.stageId || 1) : 0;
   return [g.type, normalizedStage, Number(g.page || 1), Number(g.pageSize || pageSize || 10)].join('|');
 }
 
@@ -211,14 +212,14 @@ function setTwoStepHint(message){
 async function take(type=selectedType, stageId=selectedStage, page=selectedPage, forcedTarget=null){
   if(isTabletController) tabletSetLogoPreview('');
   selectedType=type; selectedPage=Math.max(1, Number(page||1));
-  if(type==='stage' || type==='stageTimes') selectedStage=Number(stageId||selectedStage||1);
-  if(type!=='stage' && type!=='stageTimes') stageId=0;
+  if(usesStageSelector(type)) selectedStage=Number(stageId||selectedStage||1);
+  if(!usesStageSelector(type)) stageId=0;
   pageSize = Number(qs('#pageSize')?.value || 10);
   updateActive(); renderPageButtons();
 
   const key = graphicPressKey(type, selectedStage, selectedPage);
   let target = forcedTarget || (key === previewGraphicKey() ? 'program' : 'preview');
-  const r = await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:selectedStage,page:selectedPage,pageSize,title:labelFor(type, selectedStage, selectedPage),target})});
+  const r = await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:usesStageSelector(type)?selectedStage:0,page:selectedPage,pageSize,title:labelFor(type, usesStageSelector(type)?selectedStage:0, selectedPage),target})});
   if(r?.state){ state = r.state; sceneState = r.state.scene; renderSceneManager(); }
   else if(r?.scene){ sceneState = r.scene; state.scene = r.scene; renderSceneManager(); }
   setTwoStepHint(target === 'preview' ? 'Loaded to Preview. Press the same button again to send it to Live Output.' : 'Sent to Live Output.');
@@ -281,7 +282,7 @@ function tabletSetLogoPreview(url){
     img.removeAttribute('src');
   }
 }
-function tabletSelectionKey(type=selectedType, stage=selectedStage){ return `${type}:${(type==='stage'||type==='stageTimes')?stage:0}`; }
+function tabletSelectionKey(type=selectedType, stage=selectedStage){ return `${type}:${usesStageSelector(type)?stage:0}`; }
 function updateTabletUiFromState(){
   if(!isTabletController) return;
   const previewEmpty = qs('#tabletPreviewEmpty');
@@ -369,7 +370,7 @@ async function tabletAllAutoPages(){
 
   // Lock to the operator selection visible now, not to any previous auto run or socket/program state.
   const autoType = selectedType;
-  const autoStage = (autoType === 'stage' || autoType === 'stageTimes') ? Number(selectedStage || 1) : 0;
+  const autoStage = usesStageSelector(autoType) ? Number(selectedStage || 1) : 0;
   tabletSelectedKey = tabletSelectionKey(autoType, autoStage || selectedStage);
 
   // Refresh totals for the selected graphic before calculating pages.
@@ -395,13 +396,13 @@ async function tabletAllAutoPages(){
       return;
     }
     selectedType = autoType;
-    if(autoType === 'stage' || autoType === 'stageTimes') selectedStage = autoStage;
+    if(usesStageSelector(autoType)) selectedStage = autoStage;
     selectedPage = p;
     updateActive();
     renderPageButtons();
 
     // For ALL [AUTO], send directly to program. The preview monitor still follows state.
-    const sendStage = (autoType === 'stage' || autoType === 'stageTimes') ? autoStage : 0;
+    const sendStage = usesStageSelector(autoType) ? autoStage : 0;
     await take(autoType, sendStage, p, 'program');
     if(runId !== tabletAutoPageRunId || !tabletAutoPageRunning) return;
     p += 1;
@@ -441,7 +442,7 @@ function renderRundown(){
 }
 async function loadRundown(){ const r=await api('/api/rundown'); rundown = r.ok ? (r.rundown.items || []) : []; renderRundown(); }
 async function saveRundown(){ await api('/api/rundown',{method:'POST',body:JSON.stringify({items:rundown})}); renderRundown(); }
-function addCurrentToRundown(){ rundown.push({type:selectedType, stageId:(selectedType==='stage'||selectedType==='stageTimes')?selectedStage:0, page:selectedPage, pageSize}); saveRundown(); }
+function addCurrentToRundown(){ rundown.push({type:selectedType, stageId:usesStageSelector(selectedType)?selectedStage:0, page:selectedPage, pageSize}); saveRundown(); }
 function clearRundown(){ if(confirm('Clear rundown?')){ rundown=[]; rundownIndex=-1; saveRundown(); } }
 async function takeNext(){ if(!rundown.length) return alert('Rundown is empty'); rundownIndex=(rundownIndex+1)%rundown.length; const i=rundown[rundownIndex]; renderRundown(); await take(i.type,i.stageId,i.page); }
 function toggleAutoRundown(){
@@ -471,6 +472,8 @@ qsa('[data-type]').forEach(b=>b.onclick=()=>{ if(isTabletController) tabletStopA
 qsa('[data-layer]').forEach(b=>b.onclick=()=>takeLayer(b.dataset.layer));
 qsa('[data-target="stage"]').forEach(b=>b.onclick=()=>{selectedType='stage'; selectedPage=1; updateActive(); loadTotalsForSelection(true);});
 qs('#saveEvent') && (qs('#saveEvent').onclick=loadEvent);
+qs('#eventId') && (qs('#eventId').onkeydown=(ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); loadEvent(); } });
+qs('#eventId') && (qs('#eventId').onchange=()=>loadEvent());
 qs('#refreshData') && (qs('#refreshData').onclick=()=>loadTotalsForSelection(true));
 qs('#clearGraphic') && (qs('#clearGraphic').onclick=clearGraphic);
 qs('#clearPreview') && (qs('#clearPreview').onclick=clearPreviewGraphic);
@@ -779,7 +782,7 @@ let logoLibrary = [];
 let savingLayers = false;
 let saveLayersTimer = null;
 function currentGraphicPayload(){
-  return { type:selectedType, stageId:(selectedType==='stage'||selectedType==='stageTimes')?selectedStage:0, page:selectedPage, pageSize, title:labelFor(selectedType, selectedStage, selectedPage) };
+  return { type:selectedType, stageId:usesStageSelector(selectedType)?selectedStage:0, page:selectedPage, pageSize, title:labelFor(selectedType, selectedStage, selectedPage) };
 }
 function renderSceneManager(){
   const scene = sceneState || state.scene || {};

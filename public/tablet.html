@@ -11,11 +11,10 @@
     <header class="tablet2Header">
       <div class="tablet2Title">EVENT I.D. SELECTION</div>
       <div class="tablet2EventRow">
-        <div class="tablet2IdBox">I.D.</div>
+        <input id="eventId" class="tablet2IdBox tablet2EventIdInput" type="number" inputmode="numeric" min="1" step="1" value="757" placeholder="Event I.D." aria-label="Event I.D.">
         <div id="eventNameDisplay" class="tablet2EventName">DISPLAY EVENT NAME HERE</div>
-        <button id="saveEvent" class="tablet2Refresh" title="Refresh event data">↻</button>
+        <button id="saveEvent" class="tablet2Refresh" title="Load / refresh event data">↻</button>
       </div>
-      <input id="eventId" type="hidden" value="757">
     </header>
 
     <section class="tablet2TopGrid">
@@ -75,6 +74,6 @@
     <span id="totalRows" class="hiddenText">-- rows</span>
   </main>
 <script src="/socket.io/socket.io.js"></script>
-<script src="/controller.js?v=7"></script>
+<script src="/controller.js?v=16"></script>
 </body>
 </html>
