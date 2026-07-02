@@ -18,8 +18,24 @@ function urlOverall(eventId, stageId = 0) {
 }
 function urlStage(eventId, stageId) {
   const sid = Number(stageId || 0);
-  // Do not leave ls=0: that forced every stage selector button to load the first stage/page.
+  // DJames has used several URL styles across events.  This one is kept as the
+  // primary display URL; getStage() below tries fallbacks and keeps the page that
+  // returns real Stage Classification rows.
   return `${BASE}/overall.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&m=0&ls=${sid}&simple=1&selection=all`;
+}
+function urlStageCandidates(eventId, stageId) {
+  const sid = Number(stageId || 0);
+  // IMPORTANT: Stage Results/Stage Times must come from DJames combined.php,
+  // because it exposes the LEFT Stage Classification table with crew + vehicle.
+  // overall.php is only a fallback; it can omit co-drivers/vehicles and can show
+  // only partial rows for stages other than SS1.
+  return [
+    `${BASE}/combined.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&ls=0&m=0&selection=groups&show_codrivers=1&show_vehicles=1`,
+    `${BASE}/combined.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&ls=${sid}&m=0&selection=groups&show_codrivers=1&show_vehicles=1`,
+    `${BASE}/combined.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&selection=all&show_codrivers=1&show_vehicles=1`,
+    `${BASE}/overall.php?LeaderBoards=Leader+Boards&EventID=${eventId}&StageID=${sid}&e=${eventId}&ls=${sid}&simple=1&selection=all`,
+    `${BASE}/overall.php?EventID=${eventId}&StageID=${sid}&e=${eventId}&m=0&ls=${sid}&simple=1&selection=all`
+  ].filter((v,i,a)=>a.indexOf(v)===i);
 }
 function urlEntry(eventId) { return `${BASE}/entry.php?EntryList=Entry+List&EventID=${eventId}&e=${eventId}`; }
 function urlIndex(eventId) { return `${BASE}/index.php?EventID=${eventId}`; }
@@ -127,7 +143,25 @@ function parseResultCells(cells) {
 }
 
 function stripNoise(text){
-  return clean(text).replace(/^(?:\d+|H\d+|B\/b|B|b)\s+/,'');
+  return clean(text).replace(/^(?:\d+|H\d+|B\/b|B|b)\s+/,'').replace(/^(?:B\/b|B|b)$/i,'');
+}
+
+function isNoiseCell(x){
+  const v = clean(x);
+  return !v || /^[-–—+=]+$/.test(v) || /^B\/b$|^B$|^b$/i.test(v) || /^(GBR|IRL|GB-WLS|GB-ENG|GB-SCT|ISL|NZL|IMN|WLS|ENG|SCT|WAL)$/i.test(v);
+}
+function looksLikePersonName(x){
+  const v = clean(x);
+  if (isNoiseCell(v) || isTime(v) || isClass(v) || /^\d+[A-Za-z]?$/.test(v) || startsCar(v)) return false;
+  return /[A-Za-zÀ-ž]/.test(v);
+}
+
+function looksLikeCrewName(x){
+  const v = clean(x);
+  if (!looksLikePersonName(v)) return false;
+  // Towns such as Woking, Bala, Dolgellau often appear in DJames entry cells.
+  // Real crew names are normally two or more words/initials.
+  return v.split(' ').filter(Boolean).length >= 2;
 }
 
 function stripTrailingTown(name, town){
@@ -171,6 +205,227 @@ function parseResultText(text) {
   return out;
 }
 
+function firstTimeIn(arr) { return (arr || []).find(isTime) || ''; }
+function parseTimeToSeconds(value){
+  const parts = String(value || '').replace(/^\+/,'').split(':').map(Number);
+  if (!parts.every(Number.isFinite)) return null;
+  if (parts.length === 3) return parts[0]*3600 + parts[1]*60 + parts[2];
+  if (parts.length === 2) return parts[0]*60 + parts[1];
+  return null;
+}
+function formatGap(seconds){
+  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) return '';
+  const h = Math.floor(seconds/3600);
+  const m = Math.floor((seconds%3600)/60);
+  const sec = Math.round(seconds%60);
+  if (h) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`;
+  return `${m}:${String(sec).padStart(2,'0')}`;
+}
+function normNameKey(s){ return clean(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+function buildEntryMap(entriesData){
+  const map = new Map();
+  for (const r of (entriesData?.rows || [])) {
+    const no = String(r.number || '').trim();
+    if (no) map.set(no, r);
+    const dk = normNameKey(r.driver || '');
+    if (dk) map.set('driver:' + dk, r);
+  }
+  return map;
+}
+
+function isLikelyOverallRow(c){
+  const times = c.filter(isTime);
+  // Overall Classification rows normally have several time fields and many columns.
+  // Stage Classification rows have only the stage time (plus optional +/- text).
+  return c.length >= 9 && times.length >= 2;
+}
+
+function parseStageClassificationTables(html, url, limit = 10, entryMap = new Map()) {
+  const $ = cheerio.load(html);
+  const meta = pageMeta(html, url);
+  let rows = [];
+
+  // DJames puts Stage Classification and Overall Classification side-by-side.
+  // In the DOM that can appear as ONE wide table row.  For Stage Results and
+  // Stage Times we must parse only the LEFT side of each row, ending at the
+  // first Stage Time cell. Do not use the overall parser here.
+  $('tr').each((_, tr) => {
+    const cells = $(tr).children('td,th').map((__, td) => clean($(td).text())).get();
+    const parsed = parseStageClassificationCells(cells, entryMap);
+    if (parsed) rows.push(parsed);
+  });
+
+  // Some layouts are nested. If direct-child parsing found nothing, inspect all
+  // cells inside each row. Still use the left/stage segment only.
+  if (!rows.length) {
+    $('tr').each((_, tr) => {
+      const cells = $(tr).find('td,th').map((__, td) => clean($(td).text())).get();
+      const parsed = parseStageClassificationCells(cells, entryMap);
+      if (parsed) rows.push(parsed);
+    });
+  }
+
+  // De-duplicate by competition number + stage time + position, while keeping
+  // all competitors. This prevents wrapper-table duplicates but does not collapse
+  // different competitors with the same stage time.
+  const seen = new Set();
+  rows = rows.filter(r => {
+    const key = `${r.position}|${r.number}|${r.driver}|${r.totalTime}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  const leaderSeconds = rows.length ? parseTimeToSeconds(rows[0].totalTime) : null;
+  for (const r of rows) {
+    if (!r.diffPrev && leaderSeconds != null) {
+      const t = parseTimeToSeconds(r.totalTime);
+      r.diffPrev = t == null ? '' : formatGap(t - leaderSeconds);
+      r.diffFirst = r.diffPrev;
+    }
+  }
+
+  return { ...meta, sourceTable: 'stage-classification-left-table', rows: rows.slice(0, limit), totalRows: rows.length, fetchedAt: new Date().toISOString() };
+}
+
+
+function stripStageNoiseText(s){
+  return clean(s)
+    .replace(/Image:\s*[^\n]+?(?:flag|change|Up|Down)/gi, ' ')
+    .replace(/\b(?:No change|Moved Up|Moved Down|national flag)\b/gi, ' ')
+    .replace(/\b(?:GBR|IRL|GB-WLS|GB-ENG|GB-SCT|WLS|ENG|SCT|ISL|NZL|IMN|BEL|USA)\b(?:\s+national\s+flag)?/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+function findCarStartIndex(text){
+  const t = String(text || '');
+  let best = -1;
+  for (const make of carMakes) {
+    const re = new RegExp('(^|\\s)'+make.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(\\s|$)', 'i');
+    const m = t.match(re);
+    if (m) {
+      const idx = m.index + (m[1] ? m[1].length : 0);
+      if (best < 0 || idx < best) best = idx;
+    }
+  }
+  return best;
+}
+function parseCrewVehicleFromCells(cells){
+  const cleaned = (cells || []).map(stripStageNoiseText).filter(Boolean)
+    .filter(x => !isClass(x) && !isTime(x) && !/^\d+[A-Za-z]?$/.test(x));
+  if (!cleaned.length) return { driver:'', codriver:'', car:'' };
+
+  let car = '';
+  let crewCells = [...cleaned];
+  const carCellIdx = cleaned.findIndex(x => startsCar(x) || findCarStartIndex(x) === 0);
+  if (carCellIdx >= 0) {
+    car = cleaned[carCellIdx];
+    crewCells = cleaned.slice(0, carCellIdx);
+  }
+
+  let crewText = crewCells.join(' ');
+  if (!car) {
+    const carIdx = findCarStartIndex(crewText);
+    if (carIdx >= 0) {
+      car = clean(crewText.slice(carIdx));
+      crewText = clean(crewText.slice(0, carIdx));
+    }
+  }
+
+  let driver = '', codriver = '';
+  if (crewText.includes('/')) {
+    const parts = crewText.split('/');
+    driver = clean(parts.shift());
+    codriver = clean(parts.join('/'));
+  } else {
+    const names = crewText.split(/\s{2,}|\|/).map(clean).filter(Boolean);
+    if (names.length >= 2) { driver = names[0]; codriver = names[1]; }
+    else {
+      const split = splitNames(crewText);
+      driver = split.driver; codriver = split.codriver;
+    }
+  }
+  return { driver: stripNoise(driver), codriver: stripNoise(codriver), car: clean(car) };
+}
+function buildOverallDriverMapFromHtml(html, url){
+  const map = new Map();
+  try {
+    const overall = parseResultTables(html, url, 999);
+    for (const r of overall.rows || []) {
+      const dk = normNameKey(r.driver || '');
+      if (dk && (r.codriver || r.car)) map.set(dk, r);
+    }
+  } catch (_) {}
+  return map;
+}
+
+function parseStageClassificationCells(cells, entryMap = new Map()) {
+  const raw = cells.map(clean).filter(x => x !== '');
+  if (!raw.length) return null;
+
+  // Locate the stage-classification time. On DJames combined.php this is the
+  // first time value in each row. Everything after it belongs to Overall
+  // Classification and must be ignored for Stage Results/Times.
+  const timeIdx = raw.findIndex(isTime);
+  if (timeIdx < 0) return null;
+
+  // Find the stage position before the first time.
+  const posIdx = raw.findIndex((x, i) => i < timeIdx && /^\d+=?$/.test(x));
+  if (posIdx < 0) return null;
+  const position = raw[posIdx].replace('=', '');
+
+  const left = raw.slice(posIdx, timeIdx + 1);
+  const beforeTime = left.slice(1, -1);
+  const time = left[left.length - 1];
+
+  // Find the competitor number. It is normally the numeric item just before the
+  // crew cell. Ignore movement numbers in the +/- column and class numbers near
+  // the time by choosing a numeric cell followed by text that looks like crew.
+  let numberIdx = -1;
+  for (let i = 0; i < beforeTime.length; i++) {
+    if (!/^\d+[A-Za-z]?$/.test(beforeTime[i])) continue;
+    const after = beforeTime.slice(i + 1);
+    const afterText = stripStageNoiseText(after.join(' '));
+    if (afterText.includes('/') || after.some(looksLikePersonName)) { numberIdx = i; break; }
+  }
+  if (numberIdx < 0) {
+    // Fallback: first numeric after position that is not the final class value.
+    numberIdx = beforeTime.findIndex((x, i) => /^\d+[A-Za-z]?$/.test(x) && i < beforeTime.length - 1);
+  }
+  if (numberIdx < 0) return null;
+
+  const number = beforeTime[numberIdx];
+  const detailCells = beforeTime.slice(numberIdx + 1);
+  const className = [...detailCells].reverse().find(isClass) || '';
+  const crewCar = parseCrewVehicleFromCells(detailCells);
+  let driver = crewCar.driver;
+  let codriver = crewCar.codriver;
+  let car = crewCar.car;
+
+  // Enrich only missing fields. Prefer the actual combined.php row data first;
+  // then use entry/overall maps keyed by driver and finally by car number.
+  const dk = normNameKey(driver);
+  let entry = (dk && entryMap.get('driver:' + dk)) || (number ? entryMap.get(String(number).trim()) : null);
+  if (entry) {
+    if (!driver) driver = entry.driver || '';
+    if (!codriver) codriver = entry.codriver || '';
+    if (!car) car = entry.car || '';
+  }
+
+  if (!driver || !time) return null;
+  return {
+    position,
+    number,
+    driver,
+    codriver,
+    car,
+    class: className || entry?.class || '',
+    totalTime: time,
+    diffPrev: '',
+    diffFirst: ''
+  };
+}
+
 function parseEntries(html, url, limit = 999) {
   const $ = cheerio.load(html);
   const meta = pageMeta(html, url);
@@ -209,37 +464,68 @@ function inferChampionships(cells){
 }
 
 function parseEntryCells(cells) {
-  const c = cells.map(clean);
-  const number = c[0] && /^\d+[A-Za-z]?$/.test(c[0]) ? c[0] : c.find(x => /^\d+[A-Za-z]?$/.test(x));
-  if (!number) return null;
+  const c = cells.map(clean).filter(x => x !== '');
+  if (!c.length) return null;
 
-  // DJames entry table usually:
-  // 0 No, 1 Entrant/Sponsor, 2 BTRDA, 3 Driver, 4 Nat, 5 Town,
-  // 6 Co-Driver, 7 Nat, 8 Town, 9 Car, 10 Class, 11+ Championships/notes
-  if (c.length >= 10 && c[3] && c[6]) {
+  // Entry lists vary between DJames events. Prefer a structural parse based on the
+  // car column instead of fixed indexes, otherwise championship flags like B/b can
+  // be mistaken for the driver.
+  const numberIdx = c.findIndex(x => /^\d+[A-Za-z]?$/.test(x));
+  if (numberIdx < 0) return null;
+  const number = c[numberIdx];
+  const rest = c.slice(numberIdx + 1);
+  const carIdxRel = rest.findIndex(startsCar);
+
+  if (carIdxRel >= 0) {
+    const beforeCar = rest.slice(0, carIdxRel);
+    const afterCar = rest.slice(carIdxRel + 1);
+    const className = afterCar.find(isClass) || '';
     const champText = inferChampionships(c);
+    const names = beforeCar
+      .map(stripNoise)
+      .filter(looksLikePersonName)
+      .filter(x => !isClass(x));
+
+    // DJames full entry tables can include towns between the crew names:
+    // Driver, Driver town, Co-driver, Co-driver town.  Do not let a town such as
+    // Woking become the co-driver. Prefer cells that look like full crew names.
+    let driver = '', codriver = '';
+    const crewNames = names.filter(looksLikeCrewName);
+    if (crewNames.length >= 2) {
+      driver = crewNames[0] || '';
+      codriver = crewNames[1] || '';
+    } else if (names.length >= 4) {
+      driver = names[0] || '';
+      codriver = names[2] || '';
+    } else if (names.length >= 2) {
+      driver = names[0] || '';
+      codriver = names[1] || '';
+    } else if (names.length === 1) {
+      driver = names[0];
+    }
     return {
       number,
-      driver: stripTrailingTown(c[3], c[5]),
-      codriver: stripTrailingTown(c[6], c[8]),
-      car: c[9] || '',
-      class: c[10] || '',
+      driver,
+      codriver,
+      car: rest[carIdxRel] || '',
+      class: className,
       championship: champText,
       championshipText: champText
     };
   }
 
-  const idx = c.indexOf(number);
-  const rest = c.slice(idx + 1).filter(Boolean);
-  const className = [...rest].reverse().find(isClass) || '';
-  const carIdx = rest.findIndex(startsCar);
-  const car = carIdx >= 0 ? rest.slice(carIdx, className ? rest.lastIndexOf(className) : rest.length).join(' ') : '';
+  // Fallback for older/simple pages.
+  const idx = numberIdx;
+  const tail = c.slice(idx + 1).filter(Boolean);
+  const className = [...tail].reverse().find(isClass) || '';
   const champ = inferChampionships(c);
-  const nameText = rest.slice(0, carIdx >= 0 ? carIdx : rest.length)
+  const nameText = tail
+    .map(stripNoise)
+    .filter(looksLikePersonName)
     .filter(x => !isClass(x))
-    .filter(x => !/^B\/b$|^B$|^[A-Z]{2,3}$/.test(x)).join(' ');
+    .join(' ');
   const split = splitNames(nameText);
-  return { number, driver: split.driver, codriver: split.codriver, car, class: className, championship: champ, championshipText: champ };
+  return { number, driver: split.driver, codriver: split.codriver, car:'', class: className, championship: champ, championshipText: champ };
 }
 
 function parseEntryText(text) {
@@ -279,7 +565,32 @@ async function getEventInfo(eventId, ttl) {
   return { ...info, eventId, urls: { overall: urlOverall(eventId), entries: urlEntry(eventId) }, maxStageProbe: 20, fetchedAt: new Date().toISOString() };
 }
 async function getOverall(eventId, limit, ttl, stageId = 0) { const url = urlOverall(eventId, stageId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
-async function getStage(eventId, stageId, limit, ttl) { const url = urlStage(eventId, stageId); return parseResultTables(await fetchHtml(url, ttl), url, limit); }
+async function getStage(eventId, stageId, limit, ttl) {
+  let entryMap = new Map();
+  try {
+    const entries = parseEntries(await fetchHtml(urlEntry(eventId), ttl), urlEntry(eventId), 999);
+    entryMap = buildEntryMap(entries);
+  } catch (_) {}
+
+  let best = null;
+  for (const url of urlStageCandidates(eventId, stageId)) {
+    try {
+      const html = await fetchHtml(url, ttl);
+      // Use the same page's Overall Classification as an enrichment source only.
+      const overallMap = buildOverallDriverMapFromHtml(html, url);
+      const combinedMap = new Map(entryMap);
+      for (const [k, v] of overallMap.entries()) combinedMap.set('driver:' + k, v);
+      const parsed = parseStageClassificationTables(html, url, limit, combinedMap);
+      if (!best || Number(parsed.totalRows || 0) > Number(best.totalRows || 0)) best = parsed;
+      // combined.php is the correct source. If it gives a full page of stage rows,
+      // stop looking so later overall.php fallbacks cannot replace it.
+      if (/combined\.php/i.test(url) && Number(parsed.totalRows || 0) >= 10) break;
+    } catch (_) {}
+  }
+  if (best) return best;
+  const url = urlStage(eventId, stageId);
+  return parseStageClassificationTables(await fetchHtml(url, ttl), url, limit, entryMap);
+}
 async function getEntries(eventId, limit, ttl) { const url = urlEntry(eventId); return parseEntries(await fetchHtml(url, ttl), url, limit); }
 
 module.exports = { getEventInfo, getOverall, getStage, getEntries };

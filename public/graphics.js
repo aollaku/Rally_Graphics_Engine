@@ -409,8 +409,13 @@ async function render(state){
   if(!data?.ok){el.innerHTML='<div class="template-stage"><div class="template-board"><h1 class="template-title">DATA ERROR</h1></div></div>'; applyGraphicsSettings(graphicsSettings || {}, g.type); takePreparedGraphic(el, renderKey); return;}
   const rows=data.data.rows.slice((page-1)*size,page*size);
   const filled=[...rows]; while(filled.length<size) filled.push({});
-  const subtitle = g.type==='entries' ? 'ENTRY LIST' : cleanTitle((data.data.subtitle||'FINAL OVERALL POSITIONS').replace(/^.*?(FINAL\s+OVERALL\s+POSITIONS)/i,'$1'));
-  const title = g.type==='entries' ? 'ENTRY LIST' : `${subtitle}${page>1?' - PAGE '+page:''}`;
+  const rawSubtitle = String(data.data.subtitle || '').replace(/\s+-\s*page\s*\d+.*$/i, '').trim();
+  const subtitle = g.type==='entries' ? 'ENTRY LIST' : cleanTitle((rawSubtitle||'FINAL OVERALL POSITIONS').replace(/^.*?(FINAL\s+OVERALL\s+POSITIONS)/i,'$1'));
+  let title = g.type==='entries' ? 'ENTRY LIST' : subtitle;
+  if (g.type === 'stage') {
+    const parts = stageTitleParts(rawSubtitle || `Stage ${g.stageId}`, g.stageId);
+    title = cleanTitle(`STAGE RESULTS AFTER STAGE ${g.stageId}${parts.line2 ? ' - ' + parts.line2 : ''}`);
+  }
   el.className='gfx gfx-layer gfx-prep hidden';
   if(g.type==='entries') el.innerHTML = renderEntry(title, filled, page);
   else if(g.type==='stageTimes') el.innerHTML = renderStageTimes(data.data.subtitle || `Times for Stage ${g.stageId}`, filled, page);
