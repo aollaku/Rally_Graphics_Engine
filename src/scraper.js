@@ -464,8 +464,32 @@ function inferChampionships(cells){
 }
 
 function parseEntryCells(cells) {
-  const c = cells.map(clean).filter(x => x !== '');
+  // Keep empty cells for DJames Entry List. The table is column-based and many
+  // rows have blank Entrant/Sponsor or championship cells; removing empties shifts
+  // Driver / Co-driver / Car into the wrong columns.
+  const raw = cells.map(clean);
+  const c = raw.filter(x => x !== '');
   if (!c.length) return null;
+
+  // DJames final entry list layout:
+  // No | Entrant/Sponsor | BTRDA | Driver | Nat | Town | Co-Driver | Nat | Town | Car | Class
+  // Parse this fixed layout first so sponsor names are never used as drivers.
+  if (/^\d+[A-Za-z]?$/.test(raw[0] || '') && raw.length >= 10) {
+    const carIdx = raw.findIndex((x, i) => i >= 8 && startsCar(x));
+    if (carIdx >= 0) {
+      const className = raw.slice(carIdx + 1).find(isClass) || '';
+      const champText = inferChampionships(raw);
+      return {
+        number: raw[0],
+        driver: stripNoise(raw[3] || ''),
+        codriver: stripNoise(raw[6] || ''),
+        car: raw[carIdx] || '',
+        class: className,
+        championship: champText,
+        championshipText: champText
+      };
+    }
+  }
 
   // Entry lists vary between DJames events. Prefer a structural parse based on the
   // car column instead of fixed indexes, otherwise championship flags like B/b can
