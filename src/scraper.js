@@ -172,6 +172,24 @@ function stripTrailingTown(name, town){
   return n;
 }
 
+function splitEmbeddedCar(text){
+  const value = clean(text);
+  if (!value) return { name: '', car: '' };
+  const idx = findCarStartIndex(value);
+  if (idx > 0) return { name: clean(value.slice(0, idx)), car: clean(value.slice(idx)) };
+  return { name: value, car: idx === 0 ? value : '' };
+}
+function removeEmbeddedCarFromName(name, knownCar=''){
+  let value = clean(name);
+  const car = clean(knownCar);
+  if (car && value.toLowerCase().endsWith(car.toLowerCase())) {
+    value = clean(value.slice(0, -car.length));
+  }
+  const split = splitEmbeddedCar(value);
+  return split.car ? split.name : value;
+}
+
+
 function splitNames(text) {
   const words = clean(text).split(' ').filter(Boolean);
   const filtered = words.filter(w => !['B','b','B/b','GBR','IRL','GB-WLS','GB-ENG','GB-SCT','ISL','NZL','IMN'].includes(w));
@@ -405,11 +423,25 @@ function parseStageClassificationCells(cells, entryMap = new Map()) {
   // Enrich only missing fields. Prefer the actual combined.php row data first;
   // then use entry/overall maps keyed by driver and finally by car number.
   const dk = normNameKey(driver);
-  let entry = (dk && entryMap.get('driver:' + dk)) || (number ? entryMap.get(String(number).trim()) : null);
+  let entry = (number ? entryMap.get(String(number).trim()) : null) || (dk && entryMap.get('driver:' + dk)) || null;
+
+  // For Stage Results/Stage Times, the DJames stage table sometimes emits the
+  // co-driver and vehicle text as one concatenated string, for example
+  // "Patrick WalshFord Fiesta Rally2".  The Entry List is the authoritative
+  // crew/vehicle map by competition number, so prefer it when available and use
+  // it to keep the co-driver and car fields separated.
   if (entry) {
-    if (!driver) driver = entry.driver || '';
-    if (!codriver) codriver = entry.codriver || '';
-    if (!car) car = entry.car || '';
+    driver = entry.driver || driver || '';
+    codriver = entry.codriver || codriver || '';
+    car = entry.car || car || '';
+  }
+
+  if (car) {
+    driver = removeEmbeddedCarFromName(driver, car);
+    codriver = removeEmbeddedCarFromName(codriver, car);
+  } else {
+    const embedded = splitEmbeddedCar(codriver);
+    if (embedded.car) { codriver = embedded.name; car = embedded.car; }
   }
 
   if (!driver || !time) return null;
@@ -429,13 +461,87 @@ function parseStageClassificationCells(cells, entryMap = new Map()) {
 function parseEntries(html, url, limit = 999) {
   const $ = cheerio.load(html);
   const meta = pageMeta(html, url);
-  const rows = [];
-  $('table tr').each((_, tr) => {
-    const cells = $(tr).find('td,th').map((__, td) => clean($(td).text())).get();
-    const parsed = parseEntryCells(cells);
-    if (parsed) rows.push(parsed);
+  let rows = [];
+
+  // Parse entry lists by table headers and direct child cells only.  This avoids
+  // DJames nationality/town columns being pulled into Driver / Co-driver / Car.
+  $('table').each((_, table) => {
+    const trs = $(table).find('tr').toArray();
+    if (!trs.length) return;
+    let headerIdx = -1;
+    let headerCells = [];
+    for (let i = 0; i < Math.min(trs.length, 6); i++) {
+      const h = $(trs[i]).children('td,th').map((__, td) => clean($(td).text())).get();
+      const ht = h.join(' ').toLowerCase();
+      if (/\bdriver\b/.test(ht) && /co[-\s]?driver/.test(ht) && /\bcar\b/.test(ht)) {
+        headerIdx = i;
+        headerCells = h;
+        break;
+      }
+    }
+    if (headerIdx < 0) return;
+
+    const lower = headerCells.map(x => clean(x).toLowerCase());
+    const findCol = (...patterns) => lower.findIndex(x => patterns.some(p => p.test(x)));
+    const noIdx = findCol(/^no\.?$/, /^entry$/, /^car\s*no/);
+    const driverIdx = lower.findIndex(x => x === 'driver');
+    const codriverIdx = findCol(/^co[-\s]?driver$/);
+    const carIdx = lower.findIndex(x => x === 'car' || x === 'vehicle');
+    const classIdx = lower.findIndex(x => x === 'class' || x === 'cls');
+    const champsIdx = findCol(/champ/, /series/);
+
+    if (noIdx < 0 || driverIdx < 0 || codriverIdx < 0 || carIdx < 0) return;
+
+    for (let i = headerIdx + 1; i < trs.length; i++) {
+      const raw = $(trs[i]).children('td,th').map((__, td) => clean($(td).text())).get();
+      if (!raw.length || !/^\d+[A-Za-z]?$/.test(raw[noIdx] || '')) continue;
+      const champRaw = champsIdx >= 0 ? raw[champsIdx] : '';
+      const champText = clean(champRaw) || inferChampionships(raw);
+      let driver = stripNoise(raw[driverIdx] || '');
+      let codriver = stripNoise(raw[codriverIdx] || '');
+      let car = clean(raw[carIdx] || '');
+
+      // If a browser/source row has still merged neighbouring text, separate it
+      // defensively without changing the output layout.
+      if (!car) {
+        let split = splitEmbeddedCar(codriver);
+        if (split.car) { codriver = split.name; car = split.car; }
+        else {
+          split = splitEmbeddedCar(driver);
+          if (split.car) { driver = split.name; car = split.car; }
+        }
+      }
+      driver = removeEmbeddedCarFromName(driver, car);
+      codriver = removeEmbeddedCarFromName(codriver, car);
+
+      rows.push({
+        number: raw[noIdx],
+        driver,
+        codriver,
+        car,
+        class: classIdx >= 0 ? clean(raw[classIdx] || '') : '',
+        championship: champText,
+        championshipText: champText
+      });
+    }
   });
+
+  if (!rows.length) {
+    $('table tr').each((_, tr) => {
+      const cells = $(tr).children('td,th').map((__, td) => clean($(td).text())).get();
+      const parsed = parseEntryCells(cells);
+      if (parsed) rows.push(parsed);
+    });
+  }
   if (!rows.length) parseEntryText($('body').text()).forEach(r => rows.push(r));
+
+  const seen = new Set();
+  rows = rows.filter(r => {
+    const key = String(r.number || '').trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   return { ...meta, rows: rows.slice(0, limit), totalRows: rows.length, fetchedAt: new Date().toISOString() };
 }
 
@@ -482,7 +588,7 @@ function parseEntryCells(cells) {
       return {
         number: raw[0],
         driver: stripNoise(raw[3] || ''),
-        codriver: stripNoise(raw[6] || ''),
+        codriver: removeEmbeddedCarFromName(stripNoise(raw[6] || ''), raw[carIdx] || ''),
         car: raw[carIdx] || '',
         class: className,
         championship: champText,
@@ -530,7 +636,7 @@ function parseEntryCells(cells) {
     return {
       number,
       driver,
-      codriver,
+      codriver: removeEmbeddedCarFromName(codriver, rest[carIdxRel] || ''),
       car: rest[carIdxRel] || '',
       class: className,
       championship: champText,
