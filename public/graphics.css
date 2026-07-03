@@ -416,3 +416,121 @@ html,body{
 .compact-row:last-of-type{
   border-bottom:2px solid #171717!important;
 }
+
+
+/* v38: Full Frame Logo Mode. A 1920x1080 PNG with alpha is rendered 1:1 over the full output canvas.
+   Existing X/Y/scale/opacity controls still apply through the Bug / Sponsor graphics settings scope. */
+.scene-bug.logo-fullframe{
+  position:fixed!important;
+  left:0!important;
+  top:0!important;
+  right:auto!important;
+  bottom:auto!important;
+  width:100vw!important;
+  height:100vh!important;
+  max-width:none!important;
+  min-height:0!important;
+  display:block!important;
+  align-items:initial!important;
+  justify-content:initial!important;
+  gap:0!important;
+  background:transparent!important;
+  border:0!important;
+  padding:0!important;
+  margin:0!important;
+  overflow:visible!important;
+}
+.scene-bug.logo-fullframe .scene-bug-logo{
+  width:100%!important;
+  height:100%!important;
+  object-fit:contain!important;
+  display:block!important;
+}
+
+/* v41: unify Entry List white title header with Stage Results and Overall.
+   Visual-only: same font size, weight, line-height, padding and header height.
+   No data parser, pagination, controller, logo or broadcast logic changes. */
+.template-title.entry{
+  font-family:Arial,Helvetica,sans-serif!important;
+  font-size:2.35vw!important;
+  line-height:1.05!important;
+  font-weight:950!important;
+  letter-spacing:.015em!important;
+  padding:1.05vh 0 .95vh!important;
+  margin:0!important;
+  background:#fff!important;
+  color:#242424!important;
+  border:1px solid rgba(0,0,0,.35)!important;
+  border-bottom:0!important;
+  box-sizing:border-box!important;
+}
+
+@media(max-width:1000px){
+  .template-title.entry{font-size:3.4vw!important;}
+}
+
+/* v42: Unified table graphic master geometry.
+   Entry List, Stage Results and Overall Leaderboard now share identical
+   top position, title/header height, title font, table Y position, row height
+   and footer placement. Data parsing and controller logic are untouched. */
+:root{
+  --rge-table-top: 10.8vh;
+  --rge-title-font: 2.35vw;
+  --rge-title-pad-top: 1.05vh;
+  --rge-title-pad-bottom: .95vh;
+  --rge-title-line: 1.05;
+}
+.template-board,
+.template-board.result,
+.template-board.entry-board{
+  top: var(--rge-table-top) !important;
+  left: 4.0vw !important;
+  right: 4.0vw !important;
+}
+.template-title,
+.template-title.entry,
+.template-board.entry-board .template-title{
+  font-family: Arial, Helvetica, sans-serif !important;
+  font-size: var(--rge-title-font) !important;
+  line-height: var(--rge-title-line) !important;
+  font-weight: 950 !important;
+  letter-spacing: .015em !important;
+  text-transform: uppercase !important;
+  text-align: center !important;
+  margin: 0 !important;
+  padding: var(--rge-title-pad-top) 0 var(--rge-title-pad-bottom) !important;
+  background: #fff !important;
+  color: #242424 !important;
+  border: 1px solid rgba(0,0,0,.35) !important;
+  border-bottom: 0 !important;
+  box-sizing: border-box !important;
+}
+.template-table,
+.template-table.result,
+.template-table.entry{
+  margin: 0 !important;
+  padding-top: 0 !important;
+  padding-bottom: 1.45vh !important;
+}
+.template-header,
+.template-header.entryHead,
+.template-header.resultHead{
+  height: 5.8vh !important;
+  font-size: 1.48vw !important;
+  line-height: 1 !important;
+}
+.template-row,
+.template-row.entryGrid,
+.template-row.resultGrid{
+  min-height: 5.48vh !important;
+  margin-top: 1.0vh !important;
+  font-size: 1.31vw !important;
+}
+.template-row .posCell,
+.entryGrid .posCell,
+.resultGrid .posCell{
+  font-size: 1.26vw !important;
+}
+.template-footer{
+  height: 2.55vh !important;
+}

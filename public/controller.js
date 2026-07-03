@@ -214,12 +214,12 @@ async function take(type=selectedType, stageId=selectedStage, page=selectedPage,
   selectedType=type; selectedPage=Math.max(1, Number(page||1));
   if(usesStageSelector(type)) selectedStage=Number(stageId||selectedStage||1);
   if(!usesStageSelector(type)) stageId=0;
-  pageSize = Number(qs('#pageSize')?.value || 10);
+  pageSize = (type === 'entries') ? 10 : Number(qs('#pageSize')?.value || 10);
   updateActive(); renderPageButtons();
 
   const key = graphicPressKey(type, selectedStage, selectedPage);
   let target = forcedTarget || (key === previewGraphicKey() ? 'program' : 'preview');
-  const r = await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:usesStageSelector(type)?selectedStage:0,page:selectedPage,pageSize,title:labelFor(type, usesStageSelector(type)?selectedStage:0, selectedPage),target})});
+  const r = await api('/api/take',{method:'POST',body:JSON.stringify({type,stageId:usesStageSelector(type)?selectedStage:0,page:selectedPage,pageSize:(type==='entries'?10:pageSize),title:labelFor(type, usesStageSelector(type)?selectedStage:0, selectedPage),target})});
   if(r?.state){ state = r.state; sceneState = r.state.scene; renderSceneManager(); }
   else if(r?.scene){ sceneState = r.scene; state.scene = r.scene; renderSceneManager(); }
   setTwoStepHint(target === 'preview' ? 'Loaded to Preview. Press the same button again to send it to Live Output.' : 'Sent to Live Output.');
@@ -782,7 +782,7 @@ let logoLibrary = [];
 let savingLayers = false;
 let saveLayersTimer = null;
 function currentGraphicPayload(){
-  return { type:selectedType, stageId:usesStageSelector(selectedType)?selectedStage:0, page:selectedPage, pageSize, title:labelFor(selectedType, selectedStage, selectedPage) };
+  return { type:selectedType, stageId:usesStageSelector(selectedType)?selectedStage:0, page:selectedPage, pageSize:(selectedType==='entries'?10:pageSize), title:labelFor(selectedType, selectedStage, selectedPage) };
 }
 function renderSceneManager(){
   const scene = sceneState || state.scene || {};
@@ -817,7 +817,7 @@ function renderLayerDesignerControls(bug={}, clock={}){
   const map = [
     ['gsBugText', bug.text || '', 'value'],
     ['gsBugOpacity', bug.opacity ?? 100, '%'], ['gsBugX', bug.x ?? 0, 'px'], ['gsBugY', bug.y ?? 0, 'px'], ['gsBugFontSize', bug.fontSize ?? 28, 'px'],
-    ['gsBugLogoWidth', bug.logoWidth ?? 120, 'px'], ['gsBugLogoOpacity', bug.logoOpacity ?? 100, '%'], ['gsBugLogoUrl', bug.logoUrl || '', 'value'],
+    ['gsBugLogoWidth', bug.logoWidth ?? 120, 'px'], ['gsBugLogoOpacity', bug.logoOpacity ?? 100, '%'], ['gsBugLogoUrl', bug.logoUrl || '', 'value'], ['gsBugLogoMode', bug.logoMode || 'fullFrame', 'value'],
     ['gsClockOpacity', clock.opacity ?? 100, '%'], ['gsClockX', clock.x ?? 0, 'px'], ['gsClockY', clock.y ?? 0, 'px'], ['gsClockFontSize', clock.fontSize ?? 28, 'px']
   ];
   map.forEach(([id,val,mode])=>{
@@ -839,7 +839,8 @@ function readLayerDesignerControls(){
       backgroundOpacity: 72,
       logoUrl: qs('#gsBugLogoUrl')?.value || '',
       logoWidth: num('gsBugLogoWidth',120),
-      logoOpacity: num('gsBugLogoOpacity',100)
+      logoOpacity: num('gsBugLogoOpacity',100),
+      logoMode: qs('#gsBugLogoMode')?.value || 'fullFrame'
     },
     clock: {
       enabled: false,
@@ -984,7 +985,7 @@ function setupSceneManager(){
   qs('#takePreview') && (qs('#takePreview').onclick = takePreviewToProgram);
   qs('#clearProgram') && (qs('#clearProgram').onclick = clearProgramScene);
   qs('#sceneTransition') && (qs('#sceneTransition').onchange = async e => { const r=await api('/api/scene/transition',{method:'POST',body:JSON.stringify({transition:e.target.value})}); if(r.ok){sceneState=r.scene; renderSceneManager();} });
-  ['#mainLayerOpacity','#gsBugText','#gsBugOpacity','#gsBugX','#gsBugY','#gsBugFontSize','#gsBugLogoWidth','#gsBugLogoOpacity','#gsClockOpacity','#gsClockX','#gsClockY','#gsClockFontSize'].forEach(id => {
+  ['#mainLayerOpacity','#gsBugText','#gsBugOpacity','#gsBugX','#gsBugY','#gsBugFontSize','#gsBugLogoWidth','#gsBugLogoOpacity','#gsBugLogoMode','#gsClockOpacity','#gsClockX','#gsClockY','#gsClockFontSize'].forEach(id => {
     const el=qs(id); if(!el) return;
     el.addEventListener('input', saveSceneLayersDebounced);
     el.addEventListener('change', saveSceneLayers);

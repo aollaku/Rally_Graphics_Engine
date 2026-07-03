@@ -171,7 +171,9 @@ function applySceneLayers(scene={}){
   const showBugText = !!visibility.bug && !!bugLayer.text;
   const showLogo = !!visibility.logo && !!activeLogoUrl;
   bug.style.display = (showBugText || showLogo) ? 'flex' : 'none';
+  const logoFullFrame = showLogo && String(bugLayer.logoMode || 'fullFrame') === 'fullFrame';
   bug.classList.toggle('logo-only', showLogo && !showBugText);
+  bug.classList.toggle('logo-fullframe', logoFullFrame && !showBugText);
   bug.style.fontSize = `${Number(bugLayer.fontSize || 28)}px`;
   bug.style.backgroundColor = showBugText ? `rgba(0,0,0,${pct(bugLayer.backgroundOpacity,72)})` : 'transparent';
   applyDesignerScopeToLayer(bug, 'bug', { x: bugLayer.x || 0, y: bugLayer.y || 0, opacity: bugLayer.opacity ?? 100, radius: 10 });
@@ -193,9 +195,12 @@ function applySceneLayers(scene={}){
       logoImg.onload = () => repairLogoAlphaMatte(logoImg);
       logoImg.src = cleanLogoUrl;
     }
-    const nextWidth = `${Number(bugLayer.logoWidth || 120)}px`;
+    const nextWidth = logoFullFrame ? '100%' : `${Number(bugLayer.logoWidth || 120)}px`;
+    const nextHeight = logoFullFrame ? '100%' : 'auto';
     const nextOpacity = pct(bugLayer.logoOpacity);
     if (logoImg.style.width !== nextWidth) logoImg.style.width = nextWidth;
+    if (logoImg.style.height !== nextHeight) logoImg.style.height = nextHeight;
+    if (logoImg.style.objectFit !== (logoFullFrame ? 'contain' : 'contain')) logoImg.style.objectFit = 'contain';
     if (logoImg.style.opacity !== nextOpacity) logoImg.style.opacity = nextOpacity;
     if (logoImg.style.background !== 'transparent') logoImg.style.background = 'transparent';
   } else if (logoImg) {
@@ -406,7 +411,7 @@ async function render(state){
     applyGraphicsSettings(graphicsSettings || {}, g.type);
     return;
   }
-  const page=g.page||1, size=g.pageSize||10, eventId=state.eventId;
+  const page=g.page||1, size=(g.type==='entries'?10:(g.pageSize||10)), eventId=state.eventId;
   let data;
   if(g.type==='overall') data=await api(`/api/event/${eventId}/overall?stageId=${Number(g.stageId||0)}&limit=${page*size}`);
   if(g.type==='stage') data=await api(`/api/event/${eventId}/stage/${g.stageId}?limit=${page*size}`);
@@ -432,14 +437,16 @@ async function render(state){
   takePreparedGraphic(el, renderKey);
 }
 
-function renderEntry(title, rows){
+function renderEntry(title, rows, page=1){
+  const pageNo = Math.max(1, Number(page || 1));
+  const pageSize = 10;
   return `<div class="template-stage">
     <div class="template-board entry-board">
       <h1 class="template-title entry">${esc(title)}</h1>
       <div class="template-table entry">
         <div class="template-header entryHead"><div></div><div>Driver</div><div>Co-Driver</div><div>Car</div><div>Class</div><div>Champs</div></div>
-        ${rows.map(r=>`<div class="template-row entryGrid">
-          <div class="cell posCell">${esc(padNum(r.number))}</div>
+        ${rows.slice(0, pageSize).map((r,i)=>`<div class="template-row entryGrid">
+          <div class="cell posCell">${Object.keys(r||{}).length ? esc(padNum(r.number || r.position || '')) : ''}</div>
           <div class="cell">${crewName(r.driver)}</div>
           <div class="cell">${crewName(r.codriver)}</div>
           <div class="cell">${esc(r.car)}</div>

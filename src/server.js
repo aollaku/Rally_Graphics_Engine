@@ -284,7 +284,7 @@ const DEFAULT_SCENE_STATE = {
     background: { enabled: true, opacity: 100 },
     main: { enabled: true, opacity: 100 },
     // These are style/content settings only. Visibility is controlled ONLY by the controller layer buttons.
-    bug: { enabled: false, logoEnabled: false, opacity: 100, text: '', x: 0, y: 0, fontSize: 28, backgroundOpacity: 72, logoUrl: '', logoWidth: 120, logoOpacity: 100 },
+    bug: { enabled: false, logoEnabled: false, opacity: 100, text: '', x: 0, y: 0, fontSize: 28, backgroundOpacity: 72, logoUrl: '', logoWidth: 120, logoOpacity: 100, logoMode: 'fullFrame' },
     clock: { enabled: false, opacity: 100, x: 0, y: 0, fontSize: 28, backgroundOpacity: 72 }
   },
   layerVisibility: {
@@ -302,11 +302,15 @@ const DEFAULT_SCENE_STATE = {
   updatedAt: new Date().toISOString()
 };
 function normaliseGraphic(g={}){
+  const type = g.type || 'blank';
+  const requestedPageSize = Math.max(1, Math.min(20, Number(g.pageSize || 10)));
+  // v38: Entry List must always paginate exactly like the other graphics: 10 rows per page.
+  const pageSize = type === 'entries' ? 10 : requestedPageSize;
   return {
-    type: g.type || 'blank',
+    type,
     stageId: Number(g.stageId || 0),
     page: Math.max(1, Number(g.page || 1)),
-    pageSize: Math.max(1, Math.min(20, Number(g.pageSize || 10))),
+    pageSize,
     title: g.title || '',
     updatedAt: g.updatedAt || new Date().toISOString()
   };
@@ -321,6 +325,9 @@ function normaliseScene(input={}){
     bug: { ...DEFAULT_SCENE_STATE.layers.bug, ...(incomingLayers.bug || {}) },
     clock: { ...DEFAULT_SCENE_STATE.layers.clock, ...(incomingLayers.clock || {}) }
   };
+  mergedLayers.bug.logoMode = ['fit','fullFrame'].includes(mergedLayers.bug.logoMode) ? mergedLayers.bug.logoMode : 'fullFrame';
+  mergedLayers.bug.logoWidth = Math.max(20, Math.min(1920, Number(mergedLayers.bug.logoWidth || 120)));
+  mergedLayers.bug.logoOpacity = Math.max(0, Math.min(100, Number(mergedLayers.bug.logoOpacity ?? 100)));
   return {
     preview: normaliseGraphic(s.preview || {}),
     program: s.program ? normaliseGraphic(s.program) : null,
