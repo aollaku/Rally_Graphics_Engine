@@ -358,6 +358,11 @@ async function refreshGraphicsSettings(){
 
 function withToken(path){ if(!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
 function api(path){ return fetch(withToken(path), {cache:'no-store'}).then(r=>r.json()); }
+
+function crewName(v){
+  return esc(String(v || '').replace(/^(?:\d{1,4}[A-Za-z]?\s+)+(?=[A-ZÀ-Þ])/u, '').trim());
+}
+
 function esc(s){return String(s ?? '').replace(/[&<>\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function padNum(v){ const s=String(v ?? '').trim(); if(!s) return ''; return /^\d+$/.test(s) ? String(parseInt(s,10)) : s.replace(/^0+(?=\d)/,''); }
 function cleanTitle(s){ return String(s||'').replace(/\s+/g,' ').trim().toUpperCase(); }
@@ -432,13 +437,14 @@ function renderEntry(title, rows){
         <div class="template-header entryHead"><div></div><div>Driver</div><div>Co-Driver</div><div>Car</div><div>Class</div><div>Champs</div></div>
         ${rows.map(r=>`<div class="template-row entryGrid">
           <div class="cell posCell">${esc(padNum(r.number))}</div>
-          <div class="cell">${esc(r.driver)}</div>
-          <div class="cell">${esc(r.codriver)}</div>
+          <div class="cell">${crewName(r.driver)}</div>
+          <div class="cell">${crewName(r.codriver)}</div>
           <div class="cell">${esc(r.car)}</div>
           <div class="cell center">${esc(r.class)}</div>
           <div class="cell champCell"><span class="champText">${esc(champText(r))}</span></div>
         </div>`).join('')}
       </div>
+      <div class="template-footer"></div>
     </div>
   </div>`;
 }
@@ -489,8 +495,8 @@ function renderStageTimes(subtitle, rows){
     ${rows.map(r=>`<div class="compact-row">
       <div class="compact-pos">${esc(padNum(r.position))}</div>
       <div class="compact-crew">
-        <div class="crew-name">${esc(r.driver)}</div>
-        <div class="crew-name">${esc(r.codriver)}</div>
+        <div class="crew-name">${crewName(r.driver)}</div>
+        <div class="crew-name">${crewName(r.codriver)}</div>
         <div class="crew-car">${esc(r.car)}</div>
       </div>
       <div class="compact-time">
@@ -498,6 +504,7 @@ function renderStageTimes(subtitle, rows){
         <div class="stage-diff">${esc(r.diffPrev ? '+'+r.diffPrev.replace(/^\+/, '') : '')}</div>
       </div>
     </div>`).join('')}
+    <div class="compact-footer"></div>
   </div></div>`;
 }
 
@@ -510,14 +517,15 @@ function renderResult(title, rows, type){
         <div class="template-header resultHead"><div>Pos</div><div>Driver</div><div>Co-Driver</div><div>Car</div><div>Class</div><div>Time</div><div>Diff</div></div>
         ${rows.map(r=>`<div class="template-row resultGrid ${isStage ? 'stageResult' : ''}">
           <div class="cell posCell">${esc(padNum(r.position))}</div>
-          <div class="cell">${esc(r.driver)}</div>
-          <div class="cell">${esc(r.codriver)}</div>
+          <div class="cell">${crewName(r.driver)}</div>
+          <div class="cell">${crewName(r.codriver)}</div>
           <div class="cell">${esc(r.car)}</div>
           <div class="cell center">${esc(r.class)}</div>
           <div class="cell time">${esc(r.totalTime)}</div>
           <div class="cell diff">${esc(r.diffPrev||'')}</div>
         </div>`).join('')}
       </div>
+      <div class="template-footer"></div>
     </div>
   </div>`;
 }

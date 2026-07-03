@@ -100,7 +100,7 @@ html,body{
   font-variant-numeric:tabular-nums;line-height:1.15;font-size:.82vw;padding:.2vh .18vw;
   text-align:center;overflow:hidden;
 }
-.compact-time .stage-time{font-weight:950;white-space:nowrap;}
+.compact-time .stage-time{font-weight:950;white-space:nowrap;font-size:1.08vw;line-height:1;}
 .compact-time .stage-diff{font-weight:950;white-space:nowrap;font-size:.70vw;margin-top:.28vh;}
 
 @keyframes in{from{transform:translateY(18px);opacity:0}to{transform:translateY(0);opacity:1}}
@@ -287,4 +287,133 @@ html,body{
 .scene-bug.logo-only .scene-bug-logo{
   display:block!important;
   opacity:1;
+}
+
+/* v27: Stage Times main time value readability improvement.
+   Only the row time value is enlarged; TIME header and diff stay unchanged. */
+
+/* v31 visual-only footer correction
+   The orange footer is now outside the black table body so it does not cut the
+   last row or interrupt the closed black side frame. It uses the exact same
+   accent orange as the POS boxes. No parser/controller logic changed. */
+:root{--rge-accent-orange:#f6aa41;--rge-frame-black:#262421;}
+.template-footer{
+  height:2.55vh;
+  background:var(--rge-accent-orange);
+  box-sizing:border-box;
+  border-left:1.15vw solid var(--rge-frame-black);
+  border-right:1.15vw solid var(--rge-frame-black);
+  border-bottom:.32vh solid var(--rge-frame-black);
+}
+.compact-footer{
+  height:2.75vh;
+  background:var(--rge-accent-orange);
+  border-top:2px solid #171717;
+  box-sizing:border-box;
+}
+/* keep the black table closed above the footer */
+.template-table{padding-bottom:1.45vh!important;}
+.template-table.entry{padding-bottom:1.35vh!important;}
+
+/* v32: footer must be a clean solid accent bar below the closed table frame.
+   No vertical table/frame lines are allowed to cut through the orange footer. */
+.template-table{
+  border-bottom:.34vh solid var(--rge-frame-black)!important;
+}
+.template-footer{
+  display:block!important;
+  height:2.55vh!important;
+  width:100%!important;
+  background:var(--rge-accent-orange)!important;
+  border:0!important;
+  margin:0!important;
+  padding:0!important;
+  box-sizing:border-box!important;
+  position:relative!important;
+  z-index:5!important;
+}
+.compact-ss{
+  overflow:visible!important;
+}
+.compact-footer{
+  display:block!important;
+  height:2.75vh!important;
+  width:100%!important;
+  background:var(--rge-accent-orange)!important;
+  border:0!important;
+  margin:0!important;
+  padding:0!important;
+  box-sizing:border-box!important;
+  position:relative!important;
+  z-index:5!important;
+}
+.compact-row:last-of-type{
+  border-bottom:2px solid #171717!important;
+}
+
+/* v33 layout consistency: visual-only header/footer update.
+   No parser, controller, API, or data logic changes.
+   All rally table graphics use: white title panel, closed black table, solid orange footer below. */
+:root{--rge-accent-orange:#f6aa41;--rge-frame-black:#262421;}
+
+.template-title{
+  display:block!important;
+  width:100%!important;
+  margin:0!important;
+  padding:1.05vh 0 .95vh!important;
+  background:#fff!important;
+  color:#242424!important;
+  border:1px solid rgba(0,0,0,.35)!important;
+  border-bottom:0!important;
+  box-sizing:border-box!important;
+}
+.template-title.entry{
+  margin:0!important;
+  padding:1.05vh 0 .95vh!important;
+}
+.template-table{
+  margin:0!important;
+  border-left:.34vh solid var(--rge-frame-black)!important;
+  border-right:.34vh solid var(--rge-frame-black)!important;
+  border-bottom:.34vh solid var(--rge-frame-black)!important;
+  box-sizing:border-box!important;
+  overflow:hidden!important;
+}
+.template-footer{
+  display:block!important;
+  width:100%!important;
+  height:2.55vh!important;
+  background:var(--rge-accent-orange)!important;
+  border:0!important;
+  margin:0!important;
+  padding:0!important;
+  box-sizing:border-box!important;
+  position:relative!important;
+  z-index:50!important;
+}
+
+/* Stage Times compact panel gets the same white header and solid footer treatment. */
+.compact-title{
+  background:#fff!important;
+  color:#111!important;
+  border-bottom:2px solid #171717!important;
+  padding:.62vh .55vw .72vh!important;
+}
+.compact-title-main,.compact-title-stage{
+  color:#111!important;
+}
+.compact-footer{
+  display:block!important;
+  width:100%!important;
+  height:2.75vh!important;
+  background:var(--rge-accent-orange)!important;
+  border:0!important;
+  margin:0!important;
+  padding:0!important;
+  box-sizing:border-box!important;
+  position:relative!important;
+  z-index:50!important;
+}
+.compact-row:last-of-type{
+  border-bottom:2px solid #171717!important;
 }

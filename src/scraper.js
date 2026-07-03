@@ -108,7 +108,7 @@ function parseResultCells(cells) {
     }
 
     const className = afterCar.find(x => isClass(x)) || '';
-    return {
+    return normalizeCrewFields({
       position,
       number,
       driver,
@@ -118,7 +118,7 @@ function parseResultCells(cells) {
       totalTime: timeValues[0] || '',
       diffPrev: timeValues[1] || '',
       diffFirst: timeValues[2] || ''
-    };
+    });
   }
 
   // Fallback for text-only extraction.
@@ -139,11 +139,35 @@ function parseResultCells(cells) {
     .filter(x => !isClass(x))
     .filter(x => !/^(B|b|B\/b|[A-Z]{2,3}|GBR|IRL|GB-WLS|GB-ENG|GB-SCT|ISL|NZL|IMN)$/.test(x));
   const split = splitNames(nameParts.join(' '));
-  return { position: nonEmpty[posIdx].replace('=',''), number, driver: split.driver, codriver: split.codriver, car, class: className, totalTime: nonEmpty[totalIdx], diffPrev: after[0] || '', diffFirst: after[1] || '' };
+  return normalizeCrewFields({ position: nonEmpty[posIdx].replace('=',''), number, driver: split.driver, codriver: split.codriver, car, class: className, totalTime: nonEmpty[totalIdx], diffPrev: after[0] || '', diffFirst: after[1] || '' });
 }
 
 function stripNoise(text){
   return clean(text).replace(/^(?:\d+|H\d+|B\/b|B|b)\s+/,'').replace(/^(?:B\/b|B|b)$/i,'');
+}
+
+// v34: Some DJames rows can leak the competition number into the crew-name
+// fields, e.g. "116 Dale Glover" or "84 Julian Birley".  Keep
+// competition numbers only in the POS/No. columns and never in Driver or
+// Co-driver display fields.  This is a field-cleanup step only; it does not
+// change table selection, pagination, stage logic, or data parsing flow.
+function cleanCrewDisplayName(text){
+  let value = stripNoise(text);
+  // Remove one or more leading car/competition numbers accidentally prefixed
+  // to a person name.  Do not remove numbers that are part of the middle/end
+  // of a legitimate name.
+  value = value.replace(/^(?:\d{1,4}[A-Za-z]?\s+)+(?=[A-ZÀ-Þ])/u, '');
+  return clean(value);
+}
+function normalizeCrewFields(row){
+  if (!row || typeof row !== 'object') return row;
+  if ('driver' in row) row.driver = cleanCrewDisplayName(row.driver);
+  if ('codriver' in row) row.codriver = cleanCrewDisplayName(row.codriver);
+  if (row.car) {
+    row.driver = removeEmbeddedCarFromName(row.driver, row.car);
+    row.codriver = removeEmbeddedCarFromName(row.codriver, row.car);
+  }
+  return row;
 }
 
 function isNoiseCell(x){
@@ -218,7 +242,7 @@ function parseResultText(text) {
     const carTokens = carIdx >= 0 ? rest.slice(carIdx, className ? rest.lastIndexOf(className) : rest.length) : [];
     const nameText = rest.slice(0, carIdx >= 0 ? carIdx : rest.length).join(' ');
     const split = splitNames(nameText);
-    out.push({ position, number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, totalTime: total, diffPrev, diffFirst });
+    out.push(normalizeCrewFields({ position, number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, totalTime: total, diffPrev, diffFirst }));
   }
   return out;
 }
@@ -396,19 +420,25 @@ function parseStageClassificationCells(cells, entryMap = new Map()) {
   const beforeTime = left.slice(1, -1);
   const time = left[left.length - 1];
 
-  // Find the competitor number. It is normally the numeric item just before the
-  // crew cell. Ignore movement numbers in the +/- column and class numbers near
-  // the time by choosing a numeric cell followed by text that looks like crew.
+  // Find the competitor number from the actual Stage Classification columns.
+  // DJames left table is: Stg Pos | +/- | No. | Driver | Nat | Class | Stage Time.
+  // The +/- column can itself be numeric (for example "1" or "3"), so do NOT
+  // take the first numeric cell after position.  Use the numeric cell immediately
+  // before the first real driver/person cell.  This prevents Stage Times drifting
+  // to entry no. 1/3/etc. when the movement column contains a number.
   let numberIdx = -1;
-  for (let i = 0; i < beforeTime.length; i++) {
-    if (!/^\d+[A-Za-z]?$/.test(beforeTime[i])) continue;
-    const after = beforeTime.slice(i + 1);
-    const afterText = stripStageNoiseText(after.join(' '));
-    if (afterText.includes('/') || after.some(looksLikePersonName)) { numberIdx = i; break; }
+  const firstPersonIdx = beforeTime.findIndex(looksLikePersonName);
+  if (firstPersonIdx > 0) {
+    for (let i = firstPersonIdx - 1; i >= 0; i--) {
+      if (/^\d+[A-Za-z]?$/.test(beforeTime[i])) { numberIdx = i; break; }
+    }
   }
   if (numberIdx < 0) {
-    // Fallback: first numeric after position that is not the final class value.
-    numberIdx = beforeTime.findIndex((x, i) => /^\d+[A-Za-z]?$/.test(x) && i < beforeTime.length - 1);
+    // Fallback for unusual markup: choose the last numeric before a car/name cell,
+    // but never choose the final class column next to the time.
+    for (let i = 0; i < beforeTime.length - 1; i++) {
+      if (/^\d+[A-Za-z]?$/.test(beforeTime[i]) && beforeTime.slice(i + 1).some(looksLikePersonName)) numberIdx = i;
+    }
   }
   if (numberIdx < 0) return null;
 
@@ -445,7 +475,7 @@ function parseStageClassificationCells(cells, entryMap = new Map()) {
   }
 
   if (!driver || !time) return null;
-  return {
+  return normalizeCrewFields({
     position,
     number,
     driver,
@@ -455,7 +485,7 @@ function parseStageClassificationCells(cells, entryMap = new Map()) {
     totalTime: time,
     diffPrev: '',
     diffFirst: ''
-  };
+  });
 }
 
 function parseEntries(html, url, limit = 999) {
@@ -514,7 +544,7 @@ function parseEntries(html, url, limit = 999) {
       driver = removeEmbeddedCarFromName(driver, car);
       codriver = removeEmbeddedCarFromName(codriver, car);
 
-      rows.push({
+      rows.push(normalizeCrewFields({
         number: raw[noIdx],
         driver,
         codriver,
@@ -522,7 +552,7 @@ function parseEntries(html, url, limit = 999) {
         class: classIdx >= 0 ? clean(raw[classIdx] || '') : '',
         championship: champText,
         championshipText: champText
-      });
+      }));
     }
   });
 
@@ -585,7 +615,7 @@ function parseEntryCells(cells) {
     if (carIdx >= 0) {
       const className = raw.slice(carIdx + 1).find(isClass) || '';
       const champText = inferChampionships(raw);
-      return {
+      return normalizeCrewFields({
         number: raw[0],
         driver: stripNoise(raw[3] || ''),
         codriver: removeEmbeddedCarFromName(stripNoise(raw[6] || ''), raw[carIdx] || ''),
@@ -593,7 +623,7 @@ function parseEntryCells(cells) {
         class: className,
         championship: champText,
         championshipText: champText
-      };
+      });
     }
   }
 
@@ -633,7 +663,7 @@ function parseEntryCells(cells) {
     } else if (names.length === 1) {
       driver = names[0];
     }
-    return {
+    return normalizeCrewFields({
       number,
       driver,
       codriver: removeEmbeddedCarFromName(codriver, rest[carIdxRel] || ''),
@@ -641,7 +671,7 @@ function parseEntryCells(cells) {
       class: className,
       championship: champText,
       championshipText: champText
-    };
+    });
   }
 
   // Fallback for older/simple pages.
@@ -655,7 +685,7 @@ function parseEntryCells(cells) {
     .filter(x => !isClass(x))
     .join(' ');
   const split = splitNames(nameText);
-  return { number, driver: split.driver, codriver: split.codriver, car:'', class: className, championship: champ, championshipText: champ };
+  return normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car:'', class: className, championship: champ, championshipText: champ });
 }
 
 function parseEntryText(text) {
@@ -671,7 +701,7 @@ function parseEntryText(text) {
     const champ = line.match(/\bB\/b\b|\bB\b|\bb\b|BTRDA/i) ? 'BTRDA' : '';
     const nameText = tokens.slice(0, carIdx >= 0 ? carIdx : tokens.length).filter(t => !/^[A-Z]{2,3}$|^B\/b$|^B$/.test(t)).join(' ');
     const split = splitNames(nameText);
-    rows.push({ number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, championship: champ, championshipText: champ });
+    rows.push(normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, championship: champ, championshipText: champ }));
   }
   return rows;
 }
