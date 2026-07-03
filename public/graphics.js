@@ -69,17 +69,20 @@ function applyGraphicsSettings(settings={}, graphicType='global'){
   const n = (v, def) => Number.isFinite(Number(v)) ? Number(v) : def;
   const pct = v => Math.max(0, Math.min(100, n(v,100))) / 100;
 
-  // IMPORTANT: the main rally graphic must always fill the output viewport.
-  // Older Graphics Settings / Designer experiments stored width=1920, height=1080,
-  // x/y and scale values. Applying those directly makes the graphic crop or shift in
-  // Safari, controller monitor, preview and live output. Keep the programme graphic
-  // fixed to the original responsive renderer; use the settings only for safe look
-  // controls and for clock/bug layers via applyDesignerScopeToLayer().
-  root.style.setProperty('--gfx-scale', '1');
-  root.style.setProperty('--gfx-x', '0px');
-  root.style.setProperty('--gfx-y', '0px');
-  root.style.setProperty('--gfx-width', '100%');
-  root.style.setProperty('--gfx-height', '100%');
+  // v36: make the Graphics Settings controls predictable.
+  // Width/height are stored as 1920x1080 design units, where 1920/1080 means
+  // full output canvas. This keeps the default graphic responsive, while still
+  // allowing clean zoom/position adjustments without unexpected cropping.
+  const scale = Math.max(0.1, Math.min(3, n(effectiveSettings.scale, 1)));
+  const x = Math.max(-3000, Math.min(3000, n(effectiveSettings.x, 0)));
+  const y = Math.max(-3000, Math.min(3000, n(effectiveSettings.y, 0)));
+  const wPct = Math.max(16.6667, Math.min(400, (n(effectiveSettings.width, 1920) / 1920) * 100));
+  const hPct = Math.max(22.2222, Math.min(400, (n(effectiveSettings.height, 1080) / 1080) * 100));
+  root.style.setProperty('--gfx-scale', String(scale));
+  root.style.setProperty('--gfx-x', x + 'px');
+  root.style.setProperty('--gfx-y', y + 'px');
+  root.style.setProperty('--gfx-width', wPct + '%');
+  root.style.setProperty('--gfx-height', hPct + '%');
 
   root.style.setProperty('--gfx-opacity', String(pct(effectiveSettings.opacity)));
   root.style.setProperty('--gfx-bg-opacity', String(pct(effectiveSettings.backgroundOpacity)));
@@ -572,7 +575,7 @@ function forceClearFromServer(msg={}){
 
 socket.on('state', s => { window.__lastFullState = s; window.__lastScene = s?.scene; if (s?.uiSettings) { uiSettings = { ...uiSettings, ...s.uiSettings }; applySafeGuides(); } if (s?.graphicsSettings) applyGraphicsSettings(s.graphicsSettings, outputGraphic(s)?.type); applySceneLayers(s?.scene); render(s); });
 socket.on('clearRender', msg => forceClearFromServer(msg));
-socket.on('graphicsSettings', s => applyGraphicsSettings(s));
+socket.on('graphicsSettings', s => { graphicsSettings = s || graphicsSettings; applyGraphicsSettings(graphicsSettings, outputGraphic(window.__lastFullState)?.type); });
 socket.on('uiSettings', s => { uiSettings = { ...uiSettings, ...s }; applySafeGuides(); });
 async function refreshSharedState(){ try { const r = await api('/api/state'); if (r.ok) await render(r.state); } catch {} }
 refreshGraphicsSettings();

@@ -651,7 +651,7 @@ function graphicsValueText(key, value){
   if (key === 'animationSpeed') return n.toFixed(1) + 'x';
   if (key === 'animationDuration') return Math.round(n) + 'ms';
   if (key === 'rowStagger') return Math.round(n) + 'ms';
-  if (key === 'animationType' || key === 'outAnimationType') return String(val || 'fade');
+  if (key === 'animationType' || key === 'outAnimationType') return String(value || 'fade');
   return String(value);
 }
 function renderGraphicsSettings(){
@@ -711,9 +711,9 @@ function setupGraphicsSettings(){
       applyGraphicsInput(input, true);
     });
   });
-  qs('#gsPreset1080') && (qs('#gsPreset1080').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1920, height:1080 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
-  qs('#gsPreset720') && (qs('#gsPreset720').onclick = () => { graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1280, height:720 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
-  qs('#gsReset') && (qs('#gsReset').onclick = async () => { if(!confirm('Reset all graphics settings?')) return; const r = await api('/api/graphics-settings/reset', { method:'POST', body:'{}' }); if(r.ok) graphicsSettings = { ...graphicsDefaults, ...r.settings }; renderGraphicsSettings(); });
+  qs('#gsPreset1080') && (qs('#gsPreset1080').onclick = () => { pushGsUndo && pushGsUndo(); graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1920, height:1080 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
+  qs('#gsPreset720') && (qs('#gsPreset720').onclick = () => { pushGsUndo && pushGsUndo(); graphicsSettings = { ...graphicsSettings, scale:1, x:0, y:0, width:1280, height:720 }; renderGraphicsSettings(); saveGraphicsSettings(true); });
+  qs('#gsReset') && (qs('#gsReset').onclick = async () => { if(!confirm('Reset all graphics settings and all per-graphic overrides?')) return; const r = await api('/api/graphics-settings/reset', { method:'POST', body:'{}' }); if(r.ok){ allGraphicsSettings = { ...graphicsDefaults, ...r.settings, perGraphic:r.settings?.perGraphic || {} }; graphicsSettings = settingsForScope(currentGsScope); renderGraphicsSettings(); } });
   qs('#graphicsSettingsNav') && (qs('#graphicsSettingsNav').onclick = () => {
     const card = qs('#graphicsSettingsCard'); if (!card) return;
     card.scrollIntoView({ behavior:'smooth', block:'start' });
@@ -877,6 +877,22 @@ async function selectLogoFromLibrary(url){
   renderLogoLibrary();
   await saveSceneLayers();
 }
+async function deleteSelectedLogo(){
+  const select = qs('#gsLogoLibrary');
+  const url = (select && select.value) || qs('#gsBugLogoUrl')?.value || '';
+  if (!url) return alert('Select a logo from the library first.');
+  const item = logoLibrary.find(l => l.url === url);
+  const name = item ? (item.fileName || url) : url;
+  if (!confirm('Delete this uploaded logo?\n\n' + name)) return;
+  const r = await api('/api/assets/logo/delete', { method:'POST', body:JSON.stringify({ url }) });
+  if (!r.ok) return alert(r.error || 'Could not delete logo');
+  logoLibrary = r.logos || [];
+  const hidden = qs('#gsBugLogoUrl');
+  if (hidden && hidden.value === url) hidden.value = '';
+  renderLogoLibrary();
+  await saveSceneLayers();
+  setLastUpdated();
+}
 function saveSceneLayersDebounced(){
   clearTimeout(saveLayersTimer);
   saveLayersTimer = setTimeout(saveSceneLayers, 80);
@@ -982,6 +998,7 @@ function setupSceneManager(){
   }));
   qs('#gsRefreshLogos') && (qs('#gsRefreshLogos').onclick = loadLogoLibrary);
   qs('#gsClearLogo') && (qs('#gsClearLogo').onclick = async () => { await selectLogoFromLibrary(''); });
+  qs('#gsDeleteLogo') && (qs('#gsDeleteLogo').onclick = deleteSelectedLogo);
   qs('#gsLogoLibrary') && (qs('#gsLogoLibrary').onchange = async e => { await selectLogoFromLibrary(e.target.value || ''); });
   const logoFile = qs('#gsBugLogoFile');
   if (logoFile) logoFile.addEventListener('change', async () => {

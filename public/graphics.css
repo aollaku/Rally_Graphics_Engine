@@ -267,8 +267,7 @@ html,body{
 .scene-clock{will-change: transform, opacity;}
 
 
-/* v41 output viewport restore: prevent old designer/global position settings from cropping graphics. */
-.gfx,.gfx-layer{left:0!important;top:0!important;right:0!important;bottom:0!important;width:100%!important;height:100%!important;transform:translate(0,0) scale(1) translateZ(0)!important;transform-origin:top left!important;}
+/* v36: output viewport remains stable, but designer x/y/scale/size settings are now allowed through CSS variables. */
 .template-header>div,.template-row .cell{min-width:0;}
 .template-row{min-width:0;}
 .template-table{width:100%;box-sizing:border-box;}

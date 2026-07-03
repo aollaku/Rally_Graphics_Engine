@@ -524,6 +524,32 @@ app.post('/api/assets/logo/select', requireControl, async (req, res) => {
   } catch (err) { recordError('asset_select', err.message, 'orange'); res.status(500).json({ ok:false, error:humanError(err.message) }); }
 });
 
+app.post('/api/assets/logo/delete', requireControl, async (req, res) => {
+  try {
+    await loadSharedState();
+    const rawUrl = String(req.body?.url || '');
+    const logos = listUploadedLogos();
+    const item = logos.find(l => l.url === rawUrl || l.fileName === rawUrl);
+    if (!item) return res.status(404).json({ ok:false, error:'Logo not found in the uploaded logo library.' });
+    const uploadDir = path.join(__dirname, '..', 'public', 'uploads', 'logos');
+    const fullPath = path.join(uploadDir, path.basename(item.fileName));
+    if (!fullPath.startsWith(uploadDir)) return res.status(400).json({ ok:false, error:'Invalid logo path.' });
+    try { fs.unlinkSync(fullPath); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    state.scene = normaliseScene(state.scene);
+    if (state.scene.layers?.bug?.logoUrl === item.url) state.scene.layers.bug.logoUrl = '';
+    if (state.scene.logoUrls?.preview === item.url) state.scene.logoUrls.preview = '';
+    if (state.scene.logoUrls?.program === item.url) state.scene.logoUrls.program = '';
+    state.scene.updatedAt = new Date().toISOString();
+    await saveSharedState();
+    await db.audit('logo_delete', { user: req.session?.user?.username || 'token', fileName:item.fileName });
+    io.emit('state', state);
+    res.json({ ok:true, scene:state.scene, logos:listUploadedLogos() });
+  } catch (err) {
+    recordError('asset_delete', err.message, 'orange');
+    res.status(500).json({ ok:false, error:humanError(err.message) });
+  }
+});
+
 app.post('/api/assets/logo', requireControl, async (req, res) => {
   try {
     const dataUrl = String(req.body?.dataUrl || '');
