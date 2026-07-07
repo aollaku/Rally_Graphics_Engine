@@ -720,7 +720,13 @@ function setupGraphicsSettings(){
     card.classList.add('highlightCard'); setTimeout(()=>card.classList.remove('highlightCard'), 1300);
   });
 }
-socket.on('graphicsSettings', s => { graphicsSettings = { ...graphicsDefaults, ...s }; renderGraphicsSettings(); });
+socket.on('graphicsSettings', s => {
+  // Keep the designer scope stable. The server emits the full/global settings object,
+  // so do not overwrite the active per-graphic view or force the dropdown back to Global.
+  allGraphicsSettings = { ...graphicsDefaults, ...(s || {}), perGraphic: (s && s.perGraphic) || {} };
+  graphicsSettings = settingsForScope(currentGsScope);
+  renderGraphicsSettings();
+});
 window.addEventListener('DOMContentLoaded', () => { setupGraphicsSettings(); loadGraphicsSettings(); });
 
 // Scene Manager / Preview-Program workflow
@@ -1046,7 +1052,17 @@ const SHORTCUT_LABELS = {
 };
 let uiSettings = { operatorLock:false, safeGuides:false, shortcuts:{...WORKFLOW_DEFAULT_SHORTCUTS} };
 let allGraphicsSettings = { ...graphicsDefaults, perGraphic:{} };
-let currentGsScope = 'global';
+const GS_SCOPE_STORAGE_KEY = 'rge.graphicsSettings.scope';
+function getSavedGsScope(){
+  try {
+    const v = localStorage.getItem(GS_SCOPE_STORAGE_KEY);
+    return ['global','overall','stage','stageTimes','entries','bug','clock'].includes(v) ? v : 'global';
+  } catch { return 'global'; }
+}
+function saveGsScope(scope){
+  try { localStorage.setItem(GS_SCOPE_STORAGE_KEY, scope || 'global'); } catch {}
+}
+let currentGsScope = getSavedGsScope();
 let gsUndoStack = [];
 let gsRedoStack = [];
 let gsPresets = [];
@@ -1172,7 +1188,18 @@ function setupWorkflowDesigner(){
     input.addEventListener('focus', () => { input.dataset.beforeValue = input.value; });
     input.addEventListener('change', () => { if(input.dataset.beforeValue !== input.value) pushGsUndo(); });
   });
-  qs('#gsScope') && (qs('#gsScope').onchange = async e => { await saveGraphicsSettings(true); currentGsScope=e.target.value; graphicsSettings=settingsForScope(currentGsScope); renderGraphicsSettings(); });
+  qs('#gsScope') && (qs('#gsScope').onchange = e => {
+    // IMPORTANT: capture the selected value BEFORE any save/render happens.
+    // The previous version awaited saveGraphicsSettings() first; during that await
+    // the server could emit a graphicsSettings update, renderGraphicsSettings() ran,
+    // and the dropdown was reset back to currentGsScope = 'global'. Then e.target.value
+    // had already become 'global', so every selection immediately reverted.
+    const nextScope = e.target.value || 'global';
+    currentGsScope = nextScope;
+    saveGsScope(nextScope);
+    graphicsSettings = settingsForScope(nextScope);
+    renderGraphicsSettings();
+  });
   qs('#gsUndo') && (qs('#gsUndo').onclick = async () => { if(!gsUndoStack.length) return; gsRedoStack.push(cloneObj(graphicsSettings)); graphicsSettings=gsUndoStack.pop(); renderGraphicsSettings(); await saveGraphicsSettings(true); });
   qs('#gsRedo') && (qs('#gsRedo').onclick = async () => { if(!gsRedoStack.length) return; gsUndoStack.push(cloneObj(graphicsSettings)); graphicsSettings=gsRedoStack.pop(); renderGraphicsSettings(); await saveGraphicsSettings(true); });
   qs('#operatorLock') && (qs('#operatorLock').onchange = async e => { uiSettings.operatorLock=e.target.checked; setDesignerDisabled(uiSettings.operatorLock); await saveUiSettings(); });
