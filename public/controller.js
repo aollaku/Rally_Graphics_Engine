@@ -62,9 +62,9 @@ function renderPageButtons(){
   const boxes = qsa('.pageButtons');
   boxes.forEach(box => {
     box.innerHTML='';
-    // Page selector is capped at 9 buttons on both tablet and main controller.
-    // Rally pages contain 10 drivers per page, so there are no more than 9 pages needed.
-    const pages = Math.min(9, totalPagesFor(selectedType, selectedStage));
+    // Dynamic page selector: show as many pages as the current graphic needs.
+    // One page is always 10 competitors/rows, but the number of pages is based on the scraped total.
+    const pages = totalPagesFor(selectedType, selectedStage);
     for(let p=1;p<=pages;p++){
       const b=document.createElement('button');
       const start=(p-1)*pageSize+1, end=Math.min(p*pageSize, totalFor(selectedType, selectedStage)||p*pageSize);
@@ -375,7 +375,7 @@ async function tabletAllAutoPages(){
 
   // Refresh totals for the selected graphic before calculating pages.
   await loadTotalsForSelection(false);
-  const pages = Math.min(9, totalPagesFor(autoType, autoStage || selectedStage));
+  const pages = totalPagesFor(autoType, autoStage || selectedStage);
   let p = 1;
 
   tabletAutoPageRunId += 1;
