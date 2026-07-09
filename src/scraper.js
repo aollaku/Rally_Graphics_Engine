@@ -550,8 +550,8 @@ function parseEntries(html, url, limit = 999) {
         codriver,
         car,
         class: classIdx >= 0 ? clean(raw[classIdx] || '') : '',
-        championship: champText,
-        championshipText: champText
+        championship: "",
+        championshipText: ""
       }));
     }
   });
@@ -621,8 +621,8 @@ function parseEntryCells(cells) {
         codriver: removeEmbeddedCarFromName(stripNoise(raw[6] || ''), raw[carIdx] || ''),
         car: raw[carIdx] || '',
         class: className,
-        championship: champText,
-        championshipText: champText
+        championship: "",
+        championshipText: ""
       });
     }
   }
@@ -669,8 +669,8 @@ function parseEntryCells(cells) {
       codriver: removeEmbeddedCarFromName(codriver, rest[carIdxRel] || ''),
       car: rest[carIdxRel] || '',
       class: className,
-      championship: champText,
-      championshipText: champText
+      championship: "",
+      championshipText: ""
     });
   }
 
@@ -685,7 +685,7 @@ function parseEntryCells(cells) {
     .filter(x => !isClass(x))
     .join(' ');
   const split = splitNames(nameText);
-  return normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car:'', class: className, championship: champ, championshipText: champ });
+  return normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car:'', class: className, championship: "", championshipText: "" });
 }
 
 function parseEntryText(text) {
@@ -701,7 +701,7 @@ function parseEntryText(text) {
     const champ = line.match(/\bB\/b\b|\bB\b|\bb\b|BTRDA/i) ? 'BTRDA' : '';
     const nameText = tokens.slice(0, carIdx >= 0 ? carIdx : tokens.length).filter(t => !/^[A-Z]{2,3}$|^B\/b$|^B$/.test(t)).join(' ');
     const split = splitNames(nameText);
-    rows.push(normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, championship: champ, championshipText: champ }));
+    rows.push(normalizeCrewFields({ number, driver: split.driver, codriver: split.codriver, car: carTokens.join(' '), class: className, championship: "", championshipText: "" }));
   }
   return rows;
 }

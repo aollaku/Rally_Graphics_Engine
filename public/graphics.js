@@ -459,16 +459,7 @@ function renderEntry(title, rows, page=1){
   </div>`;
 }
 function champText(r){
-  if(!r || Object.keys(r).length===0) return '';
-  const raw = String(r.championshipText || r.championship || '').trim();
-  if(!raw || raw === 'false') return '';
-  if(raw === 'true' || /^B\/?b$|^B$|^b$/i.test(raw)) return 'BTRDA Rally Series, Winner Garage Skoda Championship, UK Pirelli Welsh National, Kingfisher';
-  return raw
-    .replace(/\s*,\s*/g, ', ')
-    .replace(/\bUK Pirelli Welsh\b/gi, 'UK Pirelli Welsh National')
-    .replace(/\bBTRDA\b(?! Rally Series)/gi, 'BTRDA Rally Series')
-    .replace(/\bKingfisher\b(?!.*Championship)/gi, 'Kingfisher')
-    .trim();
+  return '';
 }
 function stageTitleParts(subtitle, fallbackStage){
   const raw = String(subtitle || '').replace(/\s+/g, ' ').trim();
