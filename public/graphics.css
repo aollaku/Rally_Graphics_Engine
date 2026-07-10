@@ -534,3 +534,115 @@ html,body{
 .template-footer{
   height: 2.55vh !important;
 }
+
+/* v59 Chrome output clipping fix.
+   Keep every programme/preview graphic inside a predictable 16:9 safe canvas.
+   This is output CSS only; no parser, pagination, controller or data logic changes. */
+html,body{
+  min-width:0!important;
+  min-height:0!important;
+  width:100%!important;
+  height:100%!important;
+  overflow:hidden!important;
+  box-sizing:border-box!important;
+}
+body *{box-sizing:border-box;}
+.gfx,.gfx-layer,.template-stage,.compact-wrap{
+  position:absolute!important;
+  inset:0!important;
+  max-width:100%!important;
+  max-height:100%!important;
+  overflow:hidden!important;
+}
+
+/* Use one geometry in Chrome/Safari/Edge, including when the browser window is
+   smaller than 1000px. Previous responsive rules enlarged fonts and shifted the
+   board, which could push the last rows and footer beyond the output viewport. */
+.template-board,
+.template-board.result,
+.template-board.entry-board{
+  top:8.4vh!important;
+  left:4vw!important;
+  right:4vw!important;
+  width:auto!important;
+  max-height:88.8vh!important;
+  overflow:visible!important;
+}
+.template-title,
+.template-title.entry,
+.template-board.entry-board .template-title{
+  height:5.45vh!important;
+  min-height:5.45vh!important;
+  padding:0 1vw!important;
+  margin:0!important;
+  display:flex!important;
+  align-items:center!important;
+  justify-content:center!important;
+  font-size:2.35vw!important;
+  line-height:1!important;
+  overflow:hidden!important;
+  white-space:nowrap!important;
+  text-overflow:ellipsis!important;
+}
+.template-table,
+.template-table.result,
+.template-table.entry{
+  width:100%!important;
+  padding:0 1.15vw 1.0vh!important;
+  overflow:hidden!important;
+}
+.template-header,
+.template-header.entryHead,
+.template-header.resultHead{
+  height:5.2vh!important;
+  min-height:5.2vh!important;
+  font-size:1.48vw!important;
+}
+.template-row{
+  height:5.45vh!important;
+  min-height:5.45vh!important;
+  max-height:5.45vh!important;
+  margin-top:.68vh!important;
+  font-size:1.31vw!important;
+  overflow:hidden!important;
+}
+.template-row .cell{
+  height:5.45vh!important;
+  min-height:0!important;
+  max-height:5.45vh!important;
+}
+.template-row .posCell{font-size:1.26vw!important;}
+.entryGrid .cell:nth-child(2),.entryGrid .cell:nth-child(3){font-size:1.32vw!important;}
+.entryGrid .champCell{font-size:.78vw!important;}
+.template-footer{
+  height:2.2vh!important;
+  min-height:2.2vh!important;
+  max-height:2.2vh!important;
+}
+
+/* Compact Stage Times also stays fully inside the visible output canvas. */
+.compact-ss{
+  top:6.4vh!important;
+  max-height:91vh!important;
+  overflow:hidden!important;
+}
+.compact-row{
+  height:5.75vh!important;
+  min-height:5.75vh!important;
+  max-height:5.75vh!important;
+}
+.compact-footer{
+  height:2.35vh!important;
+  min-height:2.35vh!important;
+  max-height:2.35vh!important;
+}
+
+/* Never allow a user-agent responsive breakpoint to enlarge the output layout. */
+@media (max-width:1000px){
+  .template-board,.template-board.result,.template-board.entry-board{top:8.4vh!important;left:4vw!important;right:4vw!important;}
+  .template-title,.template-title.entry{font-size:2.35vw!important;}
+  .template-header{font-size:1.48vw!important;}
+  .template-row{font-size:1.31vw!important;}
+  .template-row .posCell{font-size:1.26vw!important;}
+  .entryGrid .champCell{font-size:.78vw!important;}
+}
