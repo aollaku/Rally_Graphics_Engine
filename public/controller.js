@@ -1,5 +1,5 @@
 const socket = io();
-let state = { eventId:'757', graphic:{type:'blank',stageId:1,page:1,pageSize:10} };
+let state = { eventId:'757', ralliesInfoUrl:'', graphic:{type:'blank',stageId:1,page:1,pageSize:10} };
 let selectedType = 'overall';
 let selectedStage = 1;
 let selectedPage = 1;
@@ -116,7 +116,8 @@ async function loadAllTotals(){
 
 async function loadEvent(){
   const eventId = (qs('#eventId')?.value || '757').replace(/\D/g,'') || '757';
-  await api('/api/event',{method:'POST',body:JSON.stringify({eventId})});
+  const ralliesInfoUrl = (qs('#ralliesInfoUrl')?.value || state.ralliesInfoUrl || '').trim();
+  await api('/api/event',{method:'POST',body:JSON.stringify({eventId, ralliesInfoUrl})});
   const info = await api(`/api/event/${eventId}/info`);
   if(info.ok){
     const tabletName=qs('#eventNameDisplay'); if(tabletName) tabletName.textContent = displayEventName(info.data, eventId);
@@ -454,6 +455,7 @@ socket.on('state', s=>{
   const oldEventId = state?.eventId;
   state=s;
   const e=qs('#eventId'); if(e) e.value=s.eventId;
+  const riu=qs('#ralliesInfoUrl'); if(riu && document.activeElement !== riu) riu.value=s.ralliesInfoUrl || '';
   if(isTabletController){
     // Tablet selector is operator-owned. Live/program state must update LEDs only;
     // it must not change the chosen GFX/stage/page, otherwise ALL [AUTO] can jump

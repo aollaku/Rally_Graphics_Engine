@@ -44,7 +44,7 @@ async function fetchHtml(url, ttl) {
   const now = Date.now();
   const item = cache.get(url);
   if (item && now - item.time < ttl) return item.html;
-  const res = await axios.get(url, { timeout: 12000, headers: { 'User-Agent': 'RallyGraphics/1.0 (+tablet graphics app)' } });
+  const res = await axios.get(url, { timeout: 15000, maxRedirects: 5, headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36 RallyGraphics/1.0', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language':'en-GB,en;q=0.9' } });
   cache.set(url, { time: now, html: res.data });
   return res.data;
 }
@@ -706,6 +706,171 @@ function parseEntryText(text) {
   return rows;
 }
 
+
+const CHAMPIONSHIP_CODE_MAP = Object.freeze({
+  GS: 'FUCHS Lubricants BTRDA® Gold Star Championship',
+  SS: 'Protyre BTRDA® Silver Star Championship',
+  BS: 'FUCHS Lubricants BTRDA Bronze Star® 1400 Rally Championship',
+  H: 'BTRDA® Historic Cup',
+  RF: 'BTRDA® Rally First Cup',
+  R2: 'BTRDA® Rallye R2 Cup',
+  W: 'Motorsport UK Pirelli Welsh Rally Championship',
+  KF: 'Kingfisher Insurance Motorsport UK English Rally Championship',
+  TCS: 'TCS Plant Rally Challenge hosting the Celtic Micra Challenge',
+  NW: 'ANWCC Forest Stage Championship',
+  HRCR: 'The West Wales Rally Spares HRCR Stage Masters Challenge 2026',
+  CAT1: 'HRCR Category 1 Stage Rally Championship'
+});
+
+function isAllowedRalliesInfoUrl(value) {
+  try {
+    const u = new URL(String(value || '').trim());
+    const host = u.hostname.toLowerCase();
+    return u.protocol === 'https:' && (host === 'rallies.info' || host === 'www.rallies.info') && /\/webentry\//i.test(u.pathname) && /\/entries\/?$/i.test(u.pathname);
+  } catch (_) { return false; }
+}
+
+function championshipCodes(value) {
+  const found = [];
+  const tokens = clean(value).toUpperCase().split(/[^A-Z0-9]+/).filter(Boolean);
+  for (const token of tokens) if (Object.prototype.hasOwnProperty.call(CHAMPIONSHIP_CODE_MAP, token) && !found.includes(token)) found.push(token);
+  return found;
+}
+
+function championshipTextFromCodes(codes) {
+  return [...new Set(codes || [])].map(code => CHAMPIONSHIP_CODE_MAP[code] || code).filter(Boolean).join(', ');
+}
+
+function parseRalliesInfoChampionships(html, url='') {
+  const $ = cheerio.load(html);
+  const byNumber = new Map();
+
+  $('table').each((_, table) => {
+    const trs = $(table).find('tr').toArray();
+    if (!trs.length) return;
+    let headerIndex = -1;
+    let headers = [];
+    for (let i=0; i<Math.min(12, trs.length); i++) {
+      const row = $(trs[i]).children('th,td').map((__, cell) => clean($(cell).text())).get();
+      const joined = row.join(' ').toLowerCase();
+      if (/\bdriver\b/.test(joined) && /co[-\s]?driver/.test(joined) && /\b(make|car|vehicle)\b/.test(joined)) {
+        headerIndex = i; headers = row; break;
+      }
+    }
+
+    const lower = headers.map(x => clean(x).toLowerCase());
+    const findExact = (...names) => lower.findIndex(x => names.includes(x));
+    let noIdx = lower.findIndex(x => /^(no\.?|number|entry|car\s*no\.?)$/.test(x));
+    let driverIdx = findExact('driver');
+    let codriverIdx = lower.findIndex(x => /^co[-\s]?driver$/.test(x));
+    const champIndexes = lower.map((x,i) => /champ/.test(x) ? i : -1).filter(i => i >= 0);
+    let driverChampIdx = champIndexes.find(i => i > driverIdx && (codriverIdx < 0 || i < codriverIdx));
+    let codriverChampIdx = champIndexes.find(i => codriverIdx >= 0 && i > codriverIdx);
+
+    // Known Rallies.info seeded-entry structure fallback:
+    // No | Driver | Club | Champs | Co-driver | Club | Champs | Make | Model | CC | Class | Sponsor
+    if (headerIndex < 0) {
+      headerIndex = -1; noIdx=0; driverIdx=1; driverChampIdx=3; codriverIdx=4; codriverChampIdx=6;
+    }
+
+    for (let i=headerIndex+1; i<trs.length; i++) {
+      const cells = $(trs[i]).children('td,th').map((__, cell) => clean($(cell).text())).get();
+      if (!cells.length) continue;
+      const number = clean(cells[noIdx] || '').replace(/[^0-9A-Za-z]/g, '');
+      if (!/^\d+[A-Za-z]?$/.test(number)) continue;
+      const driver = clean(cells[driverIdx] || '');
+      const codriver = clean(cells[codriverIdx] || '');
+      if (!driver) continue;
+      const codes = [
+        ...championshipCodes(cells[driverChampIdx] || ''),
+        ...championshipCodes(cells[codriverChampIdx] || '')
+      ];
+      byNumber.set(number, {
+        number,
+        driver,
+        codriver,
+        codes: [...new Set(codes)],
+        championshipText: championshipTextFromCodes(codes),
+        sourceUrl: url
+      });
+    }
+  });
+  return byNumber;
+}
+
+async function fetchRalliesInfoChampionships(url, ttl) {
+  if (!url) return { map:new Map(), error:'Rallies.info URL not configured' };
+  if (!isAllowedRalliesInfoUrl(url)) return { map:new Map(), error:'Invalid Rallies.info URL' };
+
+  try {
+    // The public /entries page is only a Vue shell. The actual entry data is
+    // supplied by entries_get.php as JSON. Build that endpoint from the
+    // operator-provided event URL so this remains event-independent.
+    const pageUrl = new URL(url);
+    const apiUrl = new URL('entries_get.php', pageUrl);
+    apiUrl.searchParams.set('type', pageUrl.searchParams.get('type') || 's');
+    apiUrl.searchParams.set('combined', '0');
+    apiUrl.searchParams.set('mixed', '0');
+
+    const cacheKey = apiUrl.toString();
+    const now = Date.now();
+    const cached = cache.get(cacheKey);
+    let rows;
+    if (cached && now - cached.time < ttl) {
+      rows = cached.json;
+    } else {
+      const response = await axios.get(cacheKey, {
+        timeout: 15000,
+        maxRedirects: 5,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36 RallyGraphics/1.0',
+          'Accept': 'application/json,text/plain,*/*',
+          'Referer': pageUrl.toString(),
+          'Accept-Language': 'en-GB,en;q=0.9'
+        }
+      });
+      rows = response.data;
+      cache.set(cacheKey, { time: now, json: rows });
+    }
+
+    if (!Array.isArray(rows)) {
+      return { map:new Map(), error:'Rallies.info entries_get.php did not return a JSON array' };
+    }
+
+    const byNumber = new Map();
+    for (const row of rows) {
+      const number = clean(row?.no).replace(/[^0-9A-Za-z]/g, '');
+      if (!/^\d+[A-Za-z]?$/.test(number)) continue;
+
+      const codes = [
+        ...championshipCodes(row?.champ_d || ''),
+        ...championshipCodes(row?.champ_n || '')
+      ];
+      const uniqueCodes = [...new Set(codes)];
+
+      byNumber.set(number, {
+        number,
+        driver: clean(row?.pe_name_d || ''),
+        codriver: clean(row?.pe_name_n || ''),
+        car: clean([row?.ca_make, row?.ca_model].filter(Boolean).join(' ')),
+        class: clean(row?.ca_class || ''),
+        codes: uniqueCodes,
+        championshipText: championshipTextFromCodes(uniqueCodes),
+        sourceUrl: cacheKey
+      });
+    }
+
+    return {
+      map: byNumber,
+      error: byNumber.size ? '' : 'No Rallies.info entry rows were parsed from entries_get.php'
+    };
+  } catch (err) {
+    const detail = err?.response?.data;
+    const suffix = typeof detail === 'string' ? `: ${detail.slice(0, 200)}` : '';
+    return { map:new Map(), error: `${err.message}${suffix}` };
+  }
+}
+
 async function getEventInfo(eventId, ttl) {
   const url = urlIndex(eventId);
   const html = await fetchHtml(url, ttl);
@@ -751,6 +916,26 @@ async function getStage(eventId, stageId, limit, ttl) {
   const url = urlStage(eventId, stageId);
   return parseStageClassificationTables(await fetchHtml(url, ttl), url, limit, entryMap);
 }
-async function getEntries(eventId, limit, ttl) { const url = urlEntry(eventId); return parseEntries(await fetchHtml(url, ttl), url, limit); }
+async function getEntries(eventId, limit, ttl, ralliesInfoUrl='') {
+  const url = urlEntry(eventId);
+  const data = parseEntries(await fetchHtml(url, ttl), url, limit);
+  // The DJames entry list remains authoritative for entry number, crew, car and class.
+  // Champs comes ONLY from the configured Rallies.info seeded entry list, matched by entry number.
+  const rallies = await fetchRalliesInfoChampionships(ralliesInfoUrl, ttl);
+  let matched = 0;
+  data.rows = data.rows.map(row => {
+    const match = rallies.map.get(String(row.number || '').trim());
+    if (match) matched += 1;
+    return { ...row, championship:'', championshipText: match?.championshipText || '' };
+  });
+  return {
+    ...data,
+    ralliesInfoUrl: ralliesInfoUrl || '',
+    champsSource: ralliesInfoUrl ? 'rallies.info' : 'not-configured',
+    champsRowsParsed: rallies.map.size,
+    champsRowsMatched: matched,
+    champsError: rallies.error || ''
+  };
+}
 
-module.exports = { getEventInfo, getOverall, getStage, getEntries };
+module.exports = { getEventInfo, getOverall, getStage, getEntries, isAllowedRalliesInfoUrl, parseRalliesInfoChampionships, championshipTextFromCodes };

@@ -459,7 +459,9 @@ function renderEntry(title, rows, page=1){
   </div>`;
 }
 function champText(r){
-  return '';
+  // Entry List Champs is populated by the server from the configured
+  // Rallies.info entries_get.php JSON feed. Do not fall back to DJames.
+  return String(r?.championshipText || r?.championship || '').trim();
 }
 function stageTitleParts(subtitle, fallbackStage){
   const raw = String(subtitle || '').replace(/\s+/g, ' ').trim();

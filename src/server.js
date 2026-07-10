@@ -348,6 +348,7 @@ function normaliseScene(input={}){
 
 let state = {
   eventId: DEFAULT_EVENT_ID,
+  ralliesInfoUrl: '',
   scene: { ...DEFAULT_SCENE_STATE },
   graphic: { type: 'blank', stageId: 0, page: 1, pageSize: 10, title: '', updatedAt: new Date().toISOString() },
   graphicsSettings: { ...DEFAULT_GRAPHICS_SETTINGS },
@@ -582,9 +583,14 @@ app.post('/api/assets/logo', requireControl, async (req, res) => {
 app.post('/api/event', requireControl, async (req, res) => {
   const eventId = String(req.body.eventId || '').replace(/\D/g, '');
   if (!eventId) return res.status(400).json({ ok: false, error: 'Valid EventID required' });
+  const ralliesInfoUrl = String(req.body.ralliesInfoUrl || '').trim();
+  if (ralliesInfoUrl && !scraper.isAllowedRalliesInfoUrl(ralliesInfoUrl)) {
+    return res.status(400).json({ ok:false, error:'Rallies.info URL must be an https://rallies.info or https://www.rallies.info webentry URL.' });
+  }
   state.eventId = eventId;
+  state.ralliesInfoUrl = ralliesInfoUrl;
   await saveSharedState();
-  await db.audit('set_event', { eventId, user: req.session?.user?.username || 'token' });
+  await db.audit('set_event', { eventId, ralliesInfoUrl, user: req.session?.user?.username || 'token' });
   io.emit('state', state);
   res.json({ ok: true, state });
 });
@@ -616,7 +622,8 @@ app.get('/api/event/:eventId/stage/:stageId', async (req, res) => {
 
 app.get('/api/event/:eventId/entries', async (req, res) => {
   try {
-    const data = await scraper.getEntries(req.params.eventId, Number(req.query.limit || 999), CACHE_TTL_MS);
+    const requestedRalliesUrl = String(req.query.ralliesInfoUrl || state.ralliesInfoUrl || '').trim();
+    const data = await scraper.getEntries(req.params.eventId, Number(req.query.limit || 999), CACHE_TTL_MS, requestedRalliesUrl);
     await db.upsertSnapshot(req.params.eventId, 'entries', 0, data);
     res.json({ ok: true, data });
   } catch (err) { res.status(502).json({ ok: false, error: err.message }); }

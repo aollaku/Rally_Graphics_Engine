@@ -138,3 +138,6 @@
 .tablet2EventIdInput{appearance:textfield;-moz-appearance:textfield;text-align:center;padding:0 8px;}
 .tablet2EventIdInput::-webkit-outer-spin-button,.tablet2EventIdInput::-webkit-inner-spin-button{opacity:1;height:auto;}
 .tablet-v2 .tablet2IdBox::placeholder{color:#888;font-weight:800;}
+
+.topbar .ralliesUrlInput{min-width:420px;max-width:620px;flex:1}
+@media(max-width:1200px){.topbar .ralliesUrlInput{min-width:260px;max-width:none;width:100%}}
