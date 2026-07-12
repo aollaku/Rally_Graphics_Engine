@@ -13,7 +13,11 @@
       <div class="tablet2EventRow">
         <input id="eventId" class="tablet2IdBox tablet2EventIdInput" type="number" inputmode="numeric" min="1" step="1" value="757" placeholder="Event I.D." aria-label="Event I.D.">
         <div id="eventNameDisplay" class="tablet2EventName">DISPLAY EVENT NAME HERE</div>
-        <button id="saveEvent" class="tablet2Refresh" title="Load / refresh event data">↻</button>
+        <button id="saveEvent" class="tablet2Refresh" title="Save and load event data">↻</button>
+      </div>
+      <div class="tablet2RalliesRow">
+        <label for="ralliesInfoUrl">RALLIES.INFO ENTRY URL</label>
+        <input id="ralliesInfoUrl" type="url" placeholder="https://www.rallies.info/webentry/2026/event/entries?type=s" aria-label="Rallies.info Entry URL">
       </div>
     </header>
 
@@ -74,6 +78,6 @@
     <span id="totalRows" class="hiddenText">-- rows</span>
   </main>
 <script src="/socket.io/socket.io.js"></script>
-<script src="/controller.js?v=16"></script>
+<script src="/controller.js?v=17"></script>
 </body>
 </html>

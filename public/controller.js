@@ -114,10 +114,17 @@ async function loadAllTotals(){
   renderPageButtons();
 }
 
-async function loadEvent(){
-  const eventId = (qs('#eventId')?.value || '757').replace(/\D/g,'') || '757';
-  const ralliesInfoUrl = (qs('#ralliesInfoUrl')?.value || state.ralliesInfoUrl || '').trim();
-  await api('/api/event',{method:'POST',body:JSON.stringify({eventId, ralliesInfoUrl})});
+function applySharedEventState(nextState={}){
+  if(nextState.eventId) {
+    const eventInput = qs('#eventId');
+    if(eventInput && document.activeElement !== eventInput) eventInput.value = nextState.eventId;
+  }
+  const ralliesInput = qs('#ralliesInfoUrl');
+  if(ralliesInput && document.activeElement !== ralliesInput) ralliesInput.value = nextState.ralliesInfoUrl || '';
+}
+
+async function refreshEventView(){
+  const eventId = (qs('#eventId')?.value || state.eventId || '757').replace(/\D/g,'') || '757';
   const info = await api(`/api/event/${eventId}/info`);
   if(info.ok){
     const tabletName=qs('#eventNameDisplay'); if(tabletName) tabletName.textContent = displayEventName(info.data, eventId);
@@ -128,6 +135,28 @@ async function loadEvent(){
   await loadAllTotals();
   await loadRundown();
   setLastUpdated();
+}
+
+async function loadEvent(){
+  const eventId = (qs('#eventId')?.value || state.eventId || '757').replace(/\D/g,'') || '757';
+  const ralliesInfoUrl = (qs('#ralliesInfoUrl')?.value || state.ralliesInfoUrl || '').trim();
+  const saved = await api('/api/event',{method:'POST',body:JSON.stringify({eventId, ralliesInfoUrl})});
+  if(saved?.ok){ state = saved.state || { ...state, eventId, ralliesInfoUrl }; applySharedEventState(state); }
+  await refreshEventView();
+}
+
+async function bootstrapController(){
+  const shared = await api('/api/state').catch(()=>null);
+  if(shared?.ok && shared.state){
+    state = shared.state;
+    applySharedEventState(state);
+    if(!isTabletController && state.graphic?.type && state.graphic.type !== 'blank') selectedType = state.graphic.type;
+    if(!isTabletController && state.graphic?.stageId) selectedStage = Number(state.graphic.stageId);
+    if(!isTabletController && state.graphic?.page) selectedPage = Number(state.graphic.page);
+  }
+  updateActive();
+  await refreshEventView();
+  updateTabletUiFromState();
 }
 
 function selectedTakeTarget(){
@@ -452,21 +481,20 @@ function toggleAutoRundown(){
 }
 
 socket.on('state', s=>{
-  const oldEventId = state?.eventId;
+  const eventChanged = String(s?.eventId || '') !== String(state?.eventId || '') || String(s?.ralliesInfoUrl || '') !== String(state?.ralliesInfoUrl || '');
   state=s;
-  const e=qs('#eventId'); if(e) e.value=s.eventId;
-  const riu=qs('#ralliesInfoUrl'); if(riu && document.activeElement !== riu) riu.value=s.ralliesInfoUrl || '';
+  applySharedEventState(state);
   if(isTabletController){
-    // Tablet selector is operator-owned. Live/program state must update LEDs only;
-    // it must not change the chosen GFX/stage/page, otherwise ALL [AUTO] can jump
-    // back to a previous graphic after a socket refresh.
-    if(s.eventId && s.eventId !== oldEventId) loadEvent().then(updateTabletUiFromState);
+    // Keep the tablet operator's current GFX/stage/page selection, while synchronising
+    // shared event values and all preview/program/layer status from the main controller.
+    if(eventChanged) refreshEventView().then(updateTabletUiFromState);
     updateTabletUiFromState();
     return;
   }
   if(s.graphic?.type && s.graphic.type!=='blank') selectedType=s.graphic.type;
   if(s.graphic?.stageId) selectedStage=Number(s.graphic.stageId);
   if(s.graphic?.page) selectedPage=Number(s.graphic.page);
+  if(eventChanged) refreshEventView();
   updateActive(); renderPageButtons(); updateTabletUiFromState();
 });
 
@@ -476,6 +504,8 @@ qsa('[data-target="stage"]').forEach(b=>b.onclick=()=>{selectedType='stage'; sel
 qs('#saveEvent') && (qs('#saveEvent').onclick=loadEvent);
 qs('#eventId') && (qs('#eventId').onkeydown=(ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); loadEvent(); } });
 qs('#eventId') && (qs('#eventId').onchange=()=>loadEvent());
+qs('#ralliesInfoUrl') && (qs('#ralliesInfoUrl').onkeydown=(ev)=>{ if(ev.key==='Enter'){ ev.preventDefault(); loadEvent(); } });
+qs('#ralliesInfoUrl') && (qs('#ralliesInfoUrl').onchange=()=>loadEvent());
 qs('#refreshData') && (qs('#refreshData').onclick=()=>loadTotalsForSelection(true));
 qs('#clearGraphic') && (qs('#clearGraphic').onclick=clearGraphic);
 qs('#clearPreview') && (qs('#clearPreview').onclick=clearPreviewGraphic);
@@ -494,7 +524,7 @@ qs('#takeBug') && (qs('#takeBug').onclick=tabletToggleBug);
 qsa('.logoSlot').forEach(b=>b.onclick=()=>tabletSelectLogoSlot(b.dataset.logoSlot));
 qs('#allAutoPages') && (qs('#allAutoPages').onclick=tabletAllAutoPages);
 
-setOutputFields(); initStages(); updateActive(); loadEvent().then(updateTabletUiFromState); startAutoRefresh();
+setOutputFields(); initStages(); updateActive(); bootstrapController(); startAutoRefresh();
 
 async function refreshAdmin(){
   const dbText = qs('#dbStatus'), dbDot = qs('#dbDot');

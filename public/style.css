@@ -141,3 +141,33 @@
 
 .topbar .ralliesUrlInput{min-width:420px;max-width:620px;flex:1}
 @media(max-width:1200px){.topbar .ralliesUrlInput{min-width:260px;max-width:none;width:100%}}
+
+/* v60: shared event configuration on tablet */
+.tablet-controller .tablet2RalliesRow {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.tablet-controller .tablet2RalliesRow label {
+  font-size: clamp(10px, 1.3vw, 14px);
+  font-weight: 800;
+  letter-spacing: .04em;
+  white-space: nowrap;
+}
+.tablet-controller .tablet2RalliesRow input {
+  min-width: 0;
+  width: 100%;
+  height: clamp(34px, 4.6vw, 44px);
+  box-sizing: border-box;
+  border: 2px solid rgba(255,255,255,.26);
+  border-radius: 7px;
+  padding: 0 10px;
+  background: rgba(255,255,255,.08);
+  color: inherit;
+  font-size: clamp(11px, 1.45vw, 15px);
+}
+@media (max-width: 620px) {
+  .tablet-controller .tablet2RalliesRow { grid-template-columns: 1fr; gap: 4px; }
+}
