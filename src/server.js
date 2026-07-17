@@ -473,6 +473,13 @@ app.get('/healthz', async (req, res) => {
   res.json({ ok: true, instance: INSTANCE_ID, database });
 });
 app.get('/api/me', requireLogin, (req, res) => res.json({ ok:true, user:req.session.user, instance: INSTANCE_ID }));
+app.get('/api/runtime-config', requireLogin, (req, res) => res.json({
+  ok:true,
+  config:{
+    outputHttpPort: Number(process.env.PUBLIC_HTTP_PORT || 8080),
+    mediaHlsPort: Number(process.env.PUBLIC_HLS_PORT || 8888)
+  }
+}));
 app.get('/api/state', async (req, res) => res.json({ ok: true, state: await loadSharedState(), instance: INSTANCE_ID }));
 app.get('/api/graphics-settings', async (req, res) => {
   const shared = await loadSharedState();
