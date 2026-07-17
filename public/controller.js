@@ -20,7 +20,12 @@ let runtimeConfig = { outputHttpPort: 8080, mediaHlsPort: 8888 };
 function usesStageSelector(type){ return type === 'overall' || type === 'stage' || type === 'stageTimes'; }
 
 function withToken(path){ if (!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
-function api(path, opts={}){ return fetch(withToken(path), {cache:'no-store', headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
+async function api(path, opts={}){
+  const response = await fetch(withToken(path), {cache:'no-store', credentials:'same-origin', headers:{'content-type':'application/json',...auth},...opts});
+  let payload={}; try { payload=await response.json(); } catch (_) { payload={ok:false,error:`HTTP ${response.status}`}; }
+  if(!response.ok && !payload.error) payload.error=`HTTP ${response.status}`;
+  return payload;
+}
 function outputOrigin(){
   const host = location.hostname || 'localhost';
   const port = Number(runtimeConfig.outputHttpPort || 8080);

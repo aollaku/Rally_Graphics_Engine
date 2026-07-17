@@ -365,7 +365,12 @@ async function refreshGraphicsSettings(){
 }
 
 function withToken(path){ if(!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
-function api(path){ return fetch(withToken(path), {cache:'no-store'}).then(r=>r.json()); }
+async function api(path){
+  const response = await fetch(withToken(path), {cache:'no-store', credentials:'same-origin'});
+  let payload={}; try { payload=await response.json(); } catch (_) { payload={ok:false,error:`HTTP ${response.status}`}; }
+  if(!response.ok && !payload.error) payload.error=`HTTP ${response.status}`;
+  return payload;
+}
 
 function crewName(v){
   return esc(String(v || '').replace(/^(?:\d{1,4}[A-Za-z]?\s+)+(?=[A-ZÀ-Þ])/u, '').trim());

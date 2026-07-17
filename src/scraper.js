@@ -1,5 +1,7 @@
 const axios = require('axios');
 const cheerio = require('cheerio');
+const https = require('https');
+const http = require('http');
 
 const BASE = 'https://results.djames.org.uk/results';
 const cache = new Map();
@@ -40,13 +42,77 @@ function urlStageCandidates(eventId, stageId) {
 function urlEntry(eventId) { return `${BASE}/entry.php?EntryList=Entry+List&EventID=${eventId}&e=${eventId}`; }
 function urlIndex(eventId) { return `${BASE}/index.php?EventID=${eventId}`; }
 
+const FORCE_IPV4 = String(process.env.SCRAPER_FORCE_IPV4 || 'true').toLowerCase() !== 'false';
+const SCRAPER_PROXY_BASE = String(process.env.SCRAPER_PROXY_BASE || '').trim().replace(/\/$/, '');
+const httpsAgent = new https.Agent({ keepAlive:true, family: FORCE_IPV4 ? 4 : undefined });
+const httpAgent = new http.Agent({ keepAlive:true, family: FORCE_IPV4 ? 4 : undefined });
+const browserHeaders = {
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-GB,en-US;q=0.9,en;q=0.8',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'same-origin',
+  'Upgrade-Insecure-Requests': '1'
+};
+
+function proxyUrlFor(url){
+  if (!SCRAPER_PROXY_BASE) return '';
+  return `${SCRAPER_PROXY_BASE}${SCRAPER_PROXY_BASE.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}`;
+}
+
+async function requestHtml(url, extraHeaders={}){
+  return axios.get(url, {
+    timeout: 20000,
+    maxRedirects: 8,
+    httpsAgent,
+    httpAgent,
+    proxy: false,
+    validateStatus: status => status >= 200 && status < 400,
+    headers: { ...browserHeaders, Referer: 'https://results.djames.org.uk/results/', ...extraHeaders }
+  });
+}
+
 async function fetchHtml(url, ttl) {
   const now = Date.now();
   const item = cache.get(url);
   if (item && now - item.time < ttl) return item.html;
-  const res = await axios.get(url, { timeout: 15000, maxRedirects: 5, headers: { 'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36 RallyGraphics/1.0', 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8', 'Accept-Language':'en-GB,en;q=0.9' } });
-  cache.set(url, { time: now, html: res.data });
-  return res.data;
+  let firstError;
+  try {
+    // First request warms any server-side session/cookie and is especially useful on VPS hosts.
+    let cookie = '';
+    try {
+      const warm = await requestHtml('https://results.djames.org.uk/results/');
+      cookie = (warm.headers['set-cookie'] || []).map(v => String(v).split(';')[0]).join('; ');
+    } catch (_) {}
+    const res = await requestHtml(url, cookie ? { Cookie: cookie } : {});
+    cache.set(url, { time: now, html: res.data });
+    return res.data;
+  } catch (err) {
+    firstError = err;
+  }
+
+  // Some result servers reject datacentre/VPS address ranges with HTTP 403.
+  // SCRAPER_PROXY_BASE can point to a trusted outbound fetch relay, Cloudflare Worker,
+  // home connection, or other permitted proxy that returns the requested HTML body.
+  const relay = proxyUrlFor(url);
+  if (relay) {
+    try {
+      const res = await axios.get(relay, { timeout:25000, maxRedirects:5, proxy:false, httpsAgent, httpAgent, headers:browserHeaders });
+      cache.set(url, { time:now, html:res.data });
+      return res.data;
+    } catch (_) {}
+  }
+
+  const status = firstError?.response?.status;
+  if (status === 403) {
+    const e = new Error('The rally results website rejected this VPS public IP with HTTP 403. Set SCRAPER_PROXY_BASE to an allowed outbound fetch relay, or request the results provider to whitelist the VPS IP.');
+    e.code = 'UPSTREAM_VPS_BLOCKED';
+    throw e;
+  }
+  throw firstError;
 }
 
 function pageMeta(html, url) {
