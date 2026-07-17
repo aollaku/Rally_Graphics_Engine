@@ -37,7 +37,6 @@ function humanError(message='') {
 }
 
 const app = express();
-app.set('trust proxy', 1);
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
@@ -406,7 +405,7 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', secure: 'auto', maxAge: 1000 * 60 * 60 * 12 }
+  cookie: { httpOnly: true, sameSite: 'lax', maxAge: 1000 * 60 * 60 * 12 }
 }));
 
 function safeFileName(name){ return String(name || '').replace(/[^a-zA-Z0-9_.-]/g, ''); }
@@ -474,13 +473,6 @@ app.get('/healthz', async (req, res) => {
   res.json({ ok: true, instance: INSTANCE_ID, database });
 });
 app.get('/api/me', requireLogin, (req, res) => res.json({ ok:true, user:req.session.user, instance: INSTANCE_ID }));
-app.get('/api/runtime-config', requireLogin, (req, res) => res.json({
-  ok:true,
-  config:{
-    outputHttpPort: Number(process.env.PUBLIC_HTTP_PORT || 8080),
-    mediaHlsPort: Number(process.env.PUBLIC_HLS_PORT || 8888)
-  }
-}));
 app.get('/api/state', async (req, res) => res.json({ ok: true, state: await loadSharedState(), instance: INSTANCE_ID }));
 app.get('/api/graphics-settings', async (req, res) => {
   const shared = await loadSharedState();

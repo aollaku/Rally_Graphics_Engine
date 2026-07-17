@@ -16,32 +16,17 @@ const token = new URLSearchParams(location.search).get('token') || '';
 const tokenPart = token ? `?token=${encodeURIComponent(token)}` : '';
 const auth = token ? { 'x-rally-token': token } : {};
 const isTabletController = document.body.classList.contains('tablet-controller');
-let runtimeConfig = { outputHttpPort: 8080, mediaHlsPort: 8888 };
 function usesStageSelector(type){ return type === 'overall' || type === 'stage' || type === 'stageTimes'; }
 
 function withToken(path){ if (!token) return path; return path + (path.includes('?') ? `&token=${encodeURIComponent(token)}` : `?token=${encodeURIComponent(token)}`); }
-async function api(path, opts={}){
-  const response = await fetch(withToken(path), {cache:'no-store', credentials:'same-origin', headers:{'content-type':'application/json',...auth},...opts});
-  let payload={}; try { payload=await response.json(); } catch (_) { payload={ok:false,error:`HTTP ${response.status}`}; }
-  if(!response.ok && !payload.error) payload.error=`HTTP ${response.status}`;
-  return payload;
-}
+function api(path, opts={}){ return fetch(withToken(path), {cache:'no-store', headers:{'content-type':'application/json',...auth},...opts}).then(r=>r.json()); }
 function outputOrigin(){
   const host = location.hostname || 'localhost';
-  const port = Number(runtimeConfig.outputHttpPort || 8080);
-  return `http://${host}${port === 80 ? '' : ':' + port}`;
+  return `http://${host}:8080`;
 }
-async function loadRuntimeConfig(){
-  try {
-    const r = await api('/api/runtime-config');
-    if(r?.ok) runtimeConfig = { ...runtimeConfig, ...(r.config || {}) };
-  } catch (_) {}
-  setOutputFields();
-}
-
 function outputUrl(){ return outputOrigin() + '/output/live' + tokenPart; }
 function previewUrl(){ return location.origin + '/preview/live' + (tokenPart ? tokenPart + '&controllerPreview=1' : '?controllerPreview=1'); }
-function previewHttpUrl(){ return `${outputOrigin()}/preview/live${tokenPart}`; }
+function previewHttpUrl(){ const host = location.hostname || 'localhost'; return `http://${host}:8080/preview/live${tokenPart}`; }
 function labelFor(type, stageId=0, page=1){ return type === 'overall' ? `Overall Stage ${stageId || 0} Page ${page}` : type === 'stage' ? `Stage ${stageId} Page ${page}` : type === 'stageTimes' ? `Stage ${stageId} Times Page ${page}` : `Entry List Page ${page}`; }
 function totalFor(type, stageId=0){ return type === 'overall' ? (totals.overallStage?.[stageId] || totals.overall || 0) : type === 'entries' ? totals.entries : (totals.stage[stageId] || 0); }
 function totalPagesFor(type, stageId=0){ return Math.max(1, Math.ceil((totalFor(type, stageId) || 0) / pageSize)); }
@@ -539,7 +524,7 @@ qs('#takeBug') && (qs('#takeBug').onclick=tabletToggleBug);
 qsa('.logoSlot').forEach(b=>b.onclick=()=>tabletSelectLogoSlot(b.dataset.logoSlot));
 qs('#allAutoPages') && (qs('#allAutoPages').onclick=tabletAllAutoPages);
 
-setOutputFields(); loadRuntimeConfig(); initStages(); updateActive(); bootstrapController(); startAutoRefresh();
+setOutputFields(); initStages(); updateActive(); bootstrapController(); startAutoRefresh();
 
 async function refreshAdmin(){
   const dbText = qs('#dbStatus'), dbDot = qs('#dbDot');
@@ -1334,7 +1319,7 @@ function absoluteOutputUrl(value){
   if(!v) return '';
   if(/^https?:\/\//i.test(v) || /^srt:|^rtmp:|^ndi:/i.test(v)) return v;
   const host = location.hostname || 'localhost';
-  if(v.startsWith('/output') || v.startsWith('/preview')) return `${outputOrigin()}${v}`;
+  if(v.startsWith('/output') || v.startsWith('/preview')) return `http://${host}:8080${v}`;
   if(v.startsWith('/')) return location.origin + v;
   return v;
 }
@@ -1608,8 +1593,7 @@ async function applyIncomingToOverlayOutputs(){
 function openIncomingPreview(){
   readBroadcastEngineFromDom();
   const path = (broadcastEngine.incoming?.mediamtxPath || 'live').replace(/[^a-zA-Z0-9_-]/g,'') || 'live';
-  const port = Number(runtimeConfig.mediaHlsPort || 8888);
-  window.open(`http://${location.hostname}${port === 80 ? '' : ':' + port}/${path}/`, '_blank');
+  window.open(`http://${location.hostname}:8888/${path}/`, '_blank');
 }
 
 function setupBroadcastEngine(){
