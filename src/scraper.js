@@ -2,6 +2,10 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const https = require('https');
 const http = require('http');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 const BASE = 'https://results.djames.org.uk/results';
 const cache = new Map();
@@ -58,6 +62,93 @@ const browserHeaders = {
   'Upgrade-Insecure-Requests': '1'
 };
 
+
+function isCloudflareChallenge(html) {
+  const body = String(html || '');
+  return /<title>\s*Just a moment\.\.\.\s*<\/title>/i.test(body)
+    || /challenges\.cloudflare\.com/i.test(body)
+    || /cf-chl-/i.test(body);
+}
+
+function chromiumBinary() {
+  const candidates = [
+    process.env.CHROME_BIN,
+    '/usr/bin/chromium-browser',
+    '/usr/bin/chromium',
+    '/usr/bin/google-chrome'
+  ].filter(Boolean);
+  return candidates.find(file => {
+    try { return fs.existsSync(file); } catch (_) { return false; }
+  }) || '';
+}
+
+async function fetchHtmlWithChromium(url) {
+  const chrome = chromiumBinary();
+  if (!chrome) throw new Error('Chromium is not installed in the application container');
+
+  const profileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rge-chrome-'));
+  const timeoutMs = Math.max(15000, Number(process.env.SCRAPER_BROWSER_TIMEOUT_MS || 35000));
+  const virtualTimeMs = Math.max(8000, Number(process.env.SCRAPER_BROWSER_WAIT_MS || 15000));
+
+  const args = [
+    '--headless=new',
+    '--no-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--disable-software-rasterizer',
+    '--disable-background-networking',
+    '--disable-default-apps',
+    '--disable-extensions',
+    '--disable-sync',
+    '--metrics-recording-only',
+    '--no-first-run',
+    `--user-data-dir=${profileDir}`,
+    `--virtual-time-budget=${virtualTimeMs}`,
+    '--dump-dom',
+    url
+  ];
+
+  return new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const child = spawn(chrome, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    const timer = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        child.kill('SIGKILL');
+        try { fs.rmSync(profileDir, { recursive:true, force:true }); } catch (_) {}
+        reject(new Error(`Chromium fetch timed out after ${timeoutMs}ms`));
+      }
+    }, timeoutMs);
+
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => { stderr += chunk.toString(); });
+    child.on('error', err => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { fs.rmSync(profileDir, { recursive:true, force:true }); } catch (_) {}
+      reject(err);
+    });
+    child.on('close', code => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { fs.rmSync(profileDir, { recursive:true, force:true }); } catch (_) {}
+      if (code !== 0 && !stdout.trim()) {
+        reject(new Error(`Chromium exited with code ${code}: ${stderr.slice(-600)}`));
+        return;
+      }
+      if (!stdout.trim()) {
+        reject(new Error(`Chromium returned an empty page: ${stderr.slice(-600)}`));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 function proxyUrlFor(url){
   if (!SCRAPER_PROXY_BASE) return '';
   return `${SCRAPER_PROXY_BASE}${SCRAPER_PROXY_BASE.includes('?') ? '&' : '?'}url=${encodeURIComponent(url)}`;
@@ -80,36 +171,64 @@ async function fetchHtml(url, ttl) {
   const item = cache.get(url);
   if (item && now - item.time < ttl) return item.html;
   let firstError;
+  let challengeDetected = false;
+
   try {
-    // First request warms any server-side session/cookie and is especially useful on VPS hosts.
     let cookie = '';
     try {
       const warm = await requestHtml('https://results.djames.org.uk/results/');
       cookie = (warm.headers['set-cookie'] || []).map(v => String(v).split(';')[0]).join('; ');
     } catch (_) {}
     const res = await requestHtml(url, cookie ? { Cookie: cookie } : {});
+    if (isCloudflareChallenge(res.data)) {
+      challengeDetected = true;
+      const error = new Error('Cloudflare browser challenge returned instead of rally results');
+      error.code = 'UPSTREAM_CLOUDFLARE_CHALLENGE';
+      throw error;
+    }
     cache.set(url, { time: now, html: res.data });
     return res.data;
   } catch (err) {
     firstError = err;
+    const responseBody = err?.response?.data;
+    challengeDetected = challengeDetected || isCloudflareChallenge(responseBody);
   }
 
-  // Some result servers reject datacentre/VPS address ranges with HTTP 403.
-  // SCRAPER_PROXY_BASE can point to a trusted outbound fetch relay, Cloudflare Worker,
-  // home connection, or other permitted proxy that returns the requested HTML body.
+  // Optional full Chromium fallback. This executes the same JavaScript a normal
+  // browser executes and is useful when the upstream returns a browser check.
+  // It is enabled by default because Chromium is already part of the image.
+  const browserFallbackEnabled = String(process.env.SCRAPER_BROWSER_FALLBACK || 'true').toLowerCase() !== 'false';
+  if (browserFallbackEnabled && (challengeDetected || firstError?.response?.status === 403)) {
+    try {
+      console.warn(`[scraper] Axios received Cloudflare challenge for ${url}; trying Chromium fallback`);
+      const html = await fetchHtmlWithChromium(url);
+      if (!isCloudflareChallenge(html)) {
+        cache.set(url, { time:now, html });
+        console.log(`[scraper] Chromium fallback succeeded for ${url}`);
+        return html;
+      }
+      console.warn(`[scraper] Chromium was also presented with the Cloudflare challenge for ${url}`);
+    } catch (browserError) {
+      console.warn(`[scraper] Chromium fallback failed for ${url}: ${browserError.message}`);
+    }
+  }
+
   const relay = proxyUrlFor(url);
   if (relay) {
     try {
       const res = await axios.get(relay, { timeout:25000, maxRedirects:5, proxy:false, httpsAgent, httpAgent, headers:browserHeaders });
+      if (isCloudflareChallenge(res.data)) throw new Error('Relay returned Cloudflare challenge page');
       cache.set(url, { time:now, html:res.data });
       return res.data;
-    } catch (_) {}
+    } catch (relayError) {
+      console.warn(`[scraper] Relay fetch failed for ${url}: ${relayError.message}`);
+    }
   }
 
   const status = firstError?.response?.status;
-  if (status === 403) {
-    const e = new Error('The rally results website rejected this VPS public IP with HTTP 403. Set SCRAPER_PROXY_BASE to an allowed outbound fetch relay, or request the results provider to whitelist the VPS IP.');
-    e.code = 'UPSTREAM_VPS_BLOCKED';
+  if (status === 403 || challengeDetected) {
+    const e = new Error('Cloudflare presented a browser challenge to the VPS. The built-in Chromium fallback could not obtain the rally page. Ask the results provider to allow the VPS IP or configure SCRAPER_PROXY_BASE with an authorised relay.');
+    e.code = 'UPSTREAM_CLOUDFLARE_CHALLENGE';
     throw e;
   }
   throw firstError;
